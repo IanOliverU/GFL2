@@ -1,0 +1,24 @@
+{
+  "name": "gfl2-roguelite",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 4173 --strictPort",
+    "test": "vitest run",
+    "test:browser": "node scripts/browser-smoke.mjs",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@babylonjs/core": "9.25.0",
+    "@babylonjs/loaders": "9.25.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.63.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  }
+}
