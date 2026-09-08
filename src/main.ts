@@ -1,5 +1,6 @@
 import "./style.css";
 import { Game } from "./game";
+import { suppressContextMenuWithin } from "./input";
 
 const canvas = document.getElementById("game-canvas") as HTMLCanvasElement;
 const root = document.getElementById("ui-root") as HTMLElement;
@@ -18,8 +19,8 @@ window.addEventListener("error", (e) => {
 window.addEventListener("unhandledrejection", (e) => {
   bootError(`Load failure: ${String((e.reason as Error)?.message ?? e.reason)}`);
 });
-// Right-click aim should not open the context menu over the canvas.
-canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+// RMB remains game input if an upgrade overlay appears under the pointer.
+suppressContextMenuWithin(canvas, root);
 
 const game = new Game(canvas, root);
 const query = new URLSearchParams(location.search);

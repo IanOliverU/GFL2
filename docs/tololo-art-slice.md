@@ -1,4 +1,8 @@
-# Tololo — Green Zone playable art slice (work-in-progress, unapproved)
+# Tololo — owner-accepted working gameplay baseline
+
+Scale, hold, grounding, firing origin, RMB aim/zoom, movement, and camera
+behavior are the accepted working baseline. Final art-direction acceptance is
+still pending, and reload/walk/run/dodge animation polish remains deferred.
 
 Review question: **Does Tololo belong in this environment, and should the rest of the game follow this visual direction?**
 Visual acceptance is pending reviewer approval. Do not commit, push, or deploy any part of this slice.

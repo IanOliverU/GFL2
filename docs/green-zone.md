@@ -68,8 +68,9 @@ live (F press takes the cache).
 D. Background: north/east/west/south hazy tower rows (flat mats + fog),
 stadium-dome landmark NW (drum + squashed dome), overhead transit beam on
 two collider piers with teal tails, tower-crane silhouette NE, gradient
-sky dome + sun glow + 4 crossed-plane clouds, pale horizon haze. The dark
-void is gone.
+sky dome + sun glow, pale horizon haze. The dark void is gone. The four
+crossed-plane clouds were disabled in the Chaser milestone after a later
+capture exposed dark X-shaped silhouettes on some renderers.
 
 ## 5. Asset kit (`src/greenzone.ts` + `src/gz-layout.ts`)
 
@@ -90,7 +91,7 @@ void is gone.
 - Procedural canvas textures (original): concrete + streaks, dark concrete,
   asphalt speckle, paver joints, brushed teal, two glass grids (dense 22%
   lit for bands, sparse 8% for punched windows), hazard chevrons, signage,
-  billboard art, cloud puffs.
+  billboard art. The cloud-puff texture code is retained but not instantiated.
 - Daylight rig (`src/game.ts`): hemi sky-blue/warm-ground 1.15, warm sun
   2.2 + ACES filmic, pale fog 0.0032, horizon clear color. One 1024px
   shadow map, fixed courtyard frustum, bias tuned against acne
@@ -114,7 +115,7 @@ void is gone.
   Enemy ramp routing uses the unchanged groundHeight/RampZ path; both
   ramp mouths + deck ends validated clear in `gz-layout`.
 - Restart safety: `buildWorld` runs once per init; no per-frame allocation
-  in the slice (clouds are static sprites); no new lights per prop.
+  in the slice; no new lights per prop.
 - Perf (same SwiftShader/720p conditions): before 334 meshes, idle 22,
   walk 21. After: 364–369 meshes (enemy-count variance; slice geometry
   merged into ~15 draw calls), idle 12–23 across runs, walk 10–13. A/B:

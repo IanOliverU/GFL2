@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Input } from "../src/input";
+import { Input, suppressContextMenuWithin } from "../src/input";
 import { nextLoopTransition, objectiveComplete } from "../src/rules";
 
 describe("run transitions", () => {
@@ -29,5 +29,21 @@ describe("run transitions", () => {
     expect(input.mouseDown).toBe(false);
     expect(input.rmbDown).toBe(false);
     expect(input.lookDX).toBe(0);
+  });
+
+  it("suppresses context menus only while game-owned surfaces are installed", () => {
+    const canvas = new EventTarget();
+    const overlay = new EventTarget();
+    const cleanup = suppressContextMenuWithin(canvas, overlay);
+    const canvasMenu = new Event("contextmenu", { cancelable: true });
+    const overlayMenu = new Event("contextmenu", { cancelable: true });
+    canvas.dispatchEvent(canvasMenu);
+    overlay.dispatchEvent(overlayMenu);
+    expect(canvasMenu.defaultPrevented).toBe(true);
+    expect(overlayMenu.defaultPrevented).toBe(true);
+    cleanup();
+    const afterCleanup = new Event("contextmenu", { cancelable: true });
+    overlay.dispatchEvent(afterCleanup);
+    expect(afterCleanup.defaultPrevented).toBe(false);
   });
 });

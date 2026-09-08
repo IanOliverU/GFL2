@@ -118,7 +118,10 @@ try {
     window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyW", bubbles: true }));
     return { x: game.sim.pos.x, z: game.sim.pos.z, yaw: game.sim.yaw, pitch: game.sim.pitch };
   });
-  await page.waitForTimeout(350);
+  await page.waitForFunction((start) => {
+    const p = window.__gflGame.sim.pos;
+    return Math.hypot(p.x - start.x, p.z - start.z) > 0.55;
+  }, movementStart, { timeout: 5000 });
   const movementEnd = await page.evaluate(() => {
     const game = window.__gflGame;
     window.dispatchEvent(new KeyboardEvent("keyup", { code: "KeyW", bubbles: true }));
@@ -157,16 +160,54 @@ try {
   assert.ok(traversal.dodge > 0, "dodge cooldown did not start");
 
   // A level pauses simulation, applies one offered choice, and resumes.
-  await page.evaluate(() => {
+  const heldRmbTransition = await page.evaluate(() => {
     const game = window.__gflGame;
     game.startRun("tololo");
     game.sim.godmode = true;
+    game.input.locked = true;
+    document.dispatchEvent(new MouseEvent("mousedown", { button: 2, bubbles: true }));
+    const heldBefore = game.input.rmbDown;
+    game.sim.update(1 / 60);
+    const simHeldBefore = game.sim.aiming;
     game.sim.addXp(game.sim.build.xpNext);
+    const popupMenu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    game.ui.els["modal-slot"].dispatchEvent(popupMenu);
+    const canvasMenu = new MouseEvent("contextmenu", { bubbles: true, cancelable: true });
+    game.canvas.dispatchEvent(canvasMenu);
+    return {
+      heldBefore,
+      simHeldBefore,
+      releasedForPopup: !game.input.rmbDown,
+      simReleasedForPopup: !game.sim.aiming,
+      inputDisabled: !game.input.enabled,
+      popupMenuPrevented: popupMenu.defaultPrevented,
+      canvasMenuPrevented: canvasMenu.defaultPrevented,
+    };
   });
+  assert.deepEqual(heldRmbTransition, {
+    heldBefore: true,
+    simHeldBefore: true,
+    releasedForPopup: true,
+    simReleasedForPopup: true,
+    inputDisabled: true,
+    popupMenuPrevented: true,
+    canvasMenuPrevented: true,
+  }, "held RMB leaked through the level-up transition");
   await page.locator(".up-card").first().waitFor({ state: "visible" });
   assert.equal(await page.evaluate(() => window.__gflGame.state), "levelup");
   await page.locator(".up-card").first().click();
   assert.equal(await page.evaluate(() => window.__gflGame.state), "playing");
+  const rmbAfterPopup = await page.evaluate(() => {
+    const game = window.__gflGame;
+    game.input.locked = true;
+    document.dispatchEvent(new MouseEvent("mousedown", { button: 2, bubbles: true }));
+    game.sim.update(1 / 60);
+    const aiming = game.sim.aiming;
+    document.dispatchEvent(new MouseEvent("mouseup", { button: 2, bubbles: true }));
+    game.sim.update(1 / 60);
+    return { aiming, released: !game.input.rmbDown && !game.sim.aiming };
+  });
+  assert.deepEqual(rmbAfterPopup, { aiming: true, released: true }, "RMB aiming did not resume cleanly after the popup");
 
   // Empty attachment slots equip directly; occupied slots pause for comparison.
   await page.evaluate(() => {
@@ -285,7 +326,10 @@ try {
   });
   await locked.mouse.move(720, 410);
   await locked.keyboard.down("w");
-  await locked.waitForTimeout(300);
+  await locked.waitForFunction((start) => {
+    const p = window.__gflGame.sim.pos;
+    return Math.hypot(p.x - start.x, p.z - start.z) > 0.55;
+  }, lockedStart, { timeout: 5000 });
   await locked.keyboard.up("w");
   const lockedEnd = await locked.evaluate(() => ({
     x: window.__gflGame.sim.pos.x,
@@ -299,6 +343,23 @@ try {
   assert.equal(lockedEnd.locked, true, "pointer lock was lost during real control input");
   assert.notEqual(lockedEnd.yaw, lockedStart.yaw, "real pointer-lock mouse input did not rotate the camera");
   assert.ok((lockedEnd.x - lockedStart.x) * lockedForwardX + (lockedEnd.z - lockedStart.z) * lockedForwardZ > 0.35, "real W input did not follow the configured polarity");
+  // Exercise the combined real-pointer-lock + held-ADS + level-up path.
+  await locked.mouse.down({ button: "right" });
+  await locked.waitForFunction(() => window.__gflGame.sim.aiming, undefined, { timeout: 5000 });
+  await locked.evaluate(() => window.__gflGame.sim.addXp(window.__gflGame.sim.build.xpNext));
+  await locked.mouse.up({ button: "right" });
+  await locked.locator(".up-card").first().waitFor({ state: "visible", timeout: 5000 });
+  await locked.waitForFunction(() => document.pointerLockElement === null && window.__gflGame.camera.fov > 0.9, undefined, { timeout: 5000 });
+  const lockedPopup = await locked.evaluate(() => ({
+    state: window.__gflGame.state,
+    rmbDown: window.__gflGame.input.rmbDown,
+    aiming: window.__gflGame.sim.aiming,
+    inputEnabled: window.__gflGame.input.enabled,
+    pointerLock: document.pointerLockElement !== null,
+  }));
+  assert.deepEqual(lockedPopup, { state: "levelup", rmbDown: false, aiming: false, inputEnabled: false, pointerLock: false }, "real pointer-lock ADS leaked through level-up");
+  await locked.locator(".up-card").first().click();
+  await locked.waitForFunction(() => document.pointerLockElement === document.querySelector("#game-canvas"), undefined, { timeout: 5000 });
   await locked.keyboard.press("Escape");
   await locked.close();
 

@@ -9,6 +9,8 @@
     "preview": "vite preview --port 4173 --strictPort",
     "test": "vitest run",
     "test:browser": "node scripts/browser-smoke.mjs",
+    "test:chaser-review": "node scripts/chaser-review.mjs",
+    "perf:chaser": "node scripts/chaser-perf.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

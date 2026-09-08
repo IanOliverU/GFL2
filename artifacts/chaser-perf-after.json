@@ -1,0 +1,31 @@
+{
+  "tag": "after",
+  "revision": "e7fd85c",
+  "sourceHash": "73d71cf5d62c",
+  "articulated": true,
+  "conditions": "headless Chrome 1280x720, forced WebGL2, SwiftShader, same build/environment",
+  "enemyCount": 12,
+  "articulatedCount": 12,
+  "renderer": "WebGL2",
+  "idle": {
+    "label": "12 stationary Chasers",
+    "fps": 10.198710356615873,
+    "frameMsAvg": 98.17999999999999,
+    "frameMsP95": 103,
+    "activeMeshes": 227,
+    "activeIndices": 160386,
+    "totalMeshes": 514,
+    "drawCallsPerFrame": 232
+  },
+  "moving": {
+    "label": "12 moving Chasers",
+    "fps": 10.29489904356048,
+    "frameMsAvg": 97.37000000000002,
+    "frameMsP95": 103,
+    "activeMeshes": 227,
+    "activeIndices": 160386,
+    "totalMeshes": 514,
+    "drawCallsPerFrame": 232
+  },
+  "errors": []
+}

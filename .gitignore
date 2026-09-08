@@ -13,3 +13,5 @@ public/assets/glb/
 *.pmd
 *.vmd
 *.vpd
+# Temporary Playwright recordings; finalized review videos live in artifacts/.
+artifacts/chaser-video-raw/

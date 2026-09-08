@@ -1,4 +1,14 @@
 // Keyboard + mouse input with pointer-lock awareness and stuck-key guards.
+
+/** Prevent browser menus only on game-owned surfaces. */
+export function suppressContextMenuWithin(...surfaces: EventTarget[]): () => void {
+  const prevent = (event: Event): void => event.preventDefault();
+  for (const surface of surfaces) surface.addEventListener("contextmenu", prevent);
+  return () => {
+    for (const surface of surfaces) surface.removeEventListener("contextmenu", prevent);
+  };
+}
+
 export class Input {
   keys = new Set<string>();
   mouseDown = false;

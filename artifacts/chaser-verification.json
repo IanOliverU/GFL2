@@ -1,0 +1,113 @@
+{
+  "conditions": "headless Chrome 1280x720, forced WebGL2, SwiftShader",
+  "revision": "e7fd85c",
+  "sourceHash": "73d71cf5d62c",
+  "rngIsolation": {
+    "legacy": {
+      "rows": [
+        {
+          "speed": 3.820196375856176,
+          "attackT": 1.8971778696868569,
+          "decideT": 0.06327476247679442
+        },
+        {
+          "speed": 4.603446764135733,
+          "attackT": 1.8205868932418525,
+          "decideT": 0.07665672884322702
+        },
+        {
+          "speed": 4.410196980815382,
+          "attackT": 1.0800730499904603,
+          "decideT": 0.23168312448542563
+        }
+      ],
+      "next": 0.32505792495794594
+    },
+    "animated": {
+      "rows": [
+        {
+          "speed": 3.820196375856176,
+          "attackT": 1.8971778696868569,
+          "decideT": 0.06327476247679442
+        },
+        {
+          "speed": 4.603446764135733,
+          "attackT": 1.8205868932418525,
+          "decideT": 0.07665672884322702
+        },
+        {
+          "speed": 4.410196980815382,
+          "attackT": 1.0800730499904603,
+          "decideT": 0.23168312448542563
+        }
+      ],
+      "next": 0.32505792495794594
+    }
+  },
+  "coverNavigation": {
+    "articulated": true,
+    "startDistance": 6.5,
+    "endDistance": 0.02942353968904436,
+    "maxLateral": 1.799999999999999,
+    "rootError": 0
+  },
+  "one": {
+    "id": 16,
+    "articulated": true,
+    "childMeshes": 12
+  },
+  "anticipation": {
+    "hp": 110,
+    "attackT": 0.34
+  },
+  "strike": {
+    "attackReset": true,
+    "strikeActive": true,
+    "strikeT": 0.20333333333333337
+  },
+  "rifleSnapshot": {
+    "muzzle": {
+      "x": -8.069546286097564,
+      "y": 1.9348063490798084,
+      "z": 5.8251168850985175
+    },
+    "normalHit": true,
+    "critShot": {
+      "before": 987,
+      "after": 967.5,
+      "whiteCore": true
+    }
+  },
+  "death": {
+    "active": 0,
+    "dying": 1
+  },
+  "crowd": {
+    "count": 11,
+    "eliteCount": 1,
+    "eliteCrown": true
+  },
+  "popup": {
+    "wasHeld": true,
+    "simWasAiming": true,
+    "released": true,
+    "simReleased": true,
+    "inputDisabled": true,
+    "menuPrevented": true,
+    "state": "levelup"
+  },
+  "resumed": {
+    "state": "playing",
+    "aiming": true,
+    "cleanRelease": true
+  },
+  "cleanup": {
+    "beforeRestart": 11,
+    "activeAfter": 0,
+    "dyingAfter": 0,
+    "enemyMeshesAfter": 0,
+    "enemyJointsAfter": 0,
+    "chaserMaterialsAfter": 0
+  },
+  "errors": []
+}

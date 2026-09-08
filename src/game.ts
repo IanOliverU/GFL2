@@ -201,8 +201,7 @@ export class Game {
   // ---------- states ----------
   toTitle(): void {
     this.state = "title";
-    this.input.exitLock();
-    this.input.releaseAll();
+    this.releaseGameplayInput();
     this.attachmentQueue = [];
     this.pendingAttach = null;
     this.ui.clearOverlays();
@@ -288,8 +287,7 @@ export class Game {
   pause(): void {
     if (this.state !== "playing") return;
     this.state = "paused";
-    this.input.releaseAll();
-    this.input.exitLock();
+    this.releaseGameplayInput();
     this.ui.showPause(() => this.resume(), () => this.restart(), () => this.toTitle());
   }
 
@@ -306,8 +304,7 @@ export class Game {
     if (this.state === "playing") {
       this.equipReturn = "playing";
       this.state = "equip";
-      this.input.releaseAll();
-      this.input.exitLock();
+      this.releaseGameplayInput();
       this.ui.showEquipment(this.equipSlots(), this.equipStats(), () => this.toggleEquip());
     } else if (this.state === "equip") {
       this.ui.closeModal();
@@ -320,8 +317,7 @@ export class Game {
   onDeath(): void {
     if (this.state === "victory" || this.state === "defeat") return;
     this.state = "defeat";
-    this.input.exitLock();
-    this.input.releaseAll();
+    this.releaseGameplayInput();
     this.ui.closeModal();
     this.attachmentQueue = [];
     this.pendingAttach = null;
@@ -336,8 +332,7 @@ export class Game {
   onVictory(): void {
     if (this.state === "victory" || this.state === "defeat") return;
     this.state = "victory";
-    this.input.exitLock();
-    this.input.releaseAll();
+    this.releaseGameplayInput();
     this.ui.closeModal();
     this.attachmentQueue = [];
     this.pendingAttach = null;
@@ -372,9 +367,9 @@ export class Game {
   private grantLoopReward(): void {
     // Epic or Legendary for a random compatible slot
     const slots = slotsForChar(this.sim.build.charId);
-    const slot = slots[Math.floor(Math.random() * slots.length)]!;
-    const rarity = Math.random() < 0.45 ? "Legendary" : "Epic";
-    const def = rollAttachment(slot, rarity, Math.random, this.sim.def.baseAtk);
+    const slot = slots[Math.floor(this.sim.gameplayRandom() * slots.length)]!;
+    const rarity = this.sim.gameplayRandom() < 0.45 ? "Legendary" : "Epic";
+    const def = rollAttachment(slot, rarity, this.sim.gameplayRandom, this.sim.def.baseAtk);
     this.onAttachmentFound(def);
   }
 
@@ -394,9 +389,8 @@ export class Game {
     const build = this.sim.build;
     if (build.queuedLevels <= 0) return;
     this.state = "levelup";
-    this.input.releaseAll();
-    this.input.exitLock();
-    this.levelChoices = rollChoices(build, this.sim.def, Math.random);
+    this.releaseGameplayInput();
+    this.levelChoices = rollChoices(build, this.sim.def, this.sim.gameplayRandom);
     synth.levelup();
     this.ui.showLevelUp(this.levelChoices, build.level);
   }
@@ -419,7 +413,7 @@ export class Game {
     if (c.kind === "weapon") { this.sim.ammo = this.sim.magSize(); this.sim.reloading = 0; }
     if (build.queuedLevels > 0) {
       // chain queued levels
-      this.levelChoices = rollChoices(build, this.sim.def, Math.random);
+      this.levelChoices = rollChoices(build, this.sim.def, this.sim.gameplayRandom);
       this.ui.showLevelUp(this.levelChoices, build.level);
     } else {
       this.finishModalFlow();
@@ -450,8 +444,7 @@ export class Game {
     this.pendingAttach = def;
     this.equipReturn = this.state === "playing" ? "playing" : this.state;
     this.state = "compare";
-    this.input.releaseAll();
-    this.input.exitLock();
+    this.releaseGameplayInput();
     const delta = this.compareStats(cur, def);
     this.ui.showAttachmentCompare(cur, def,
       delta,
@@ -479,8 +472,18 @@ export class Game {
   }
 
   private requestGameplayLock(): void {
+    this.input.enabled = true;
     if (this.devMode && this.dev.get("nolock") === "1") return;
     this.input.requestLock();
+  }
+
+  private releaseGameplayInput(): void {
+    // Disable immediately while pointer-lock release is still asynchronous.
+    this.input.enabled = false;
+    this.input.releaseAll();
+    this.sim.aiming = false;
+    this.sim.clearTransientPresentation();
+    this.input.exitLock();
   }
 
   private processModalQueue(): void {
@@ -622,7 +625,7 @@ export class Game {
     }
     this.camera.position.copyFrom(this.sim.camPos);
     this.camera.setTarget(this.sim.camTarget);
-    const aiming = this.sim.input.rmbDown;
+    const aiming = this.sim.aiming;
     const scoped = aiming && this.sim.build.charId === "mosin";
     const wantFov = scoped ? 0.45 : aiming ? 0.75 : 1.0;
     this.camera.fov += (wantFov - this.camera.fov) * 0.18;

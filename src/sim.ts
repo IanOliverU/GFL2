@@ -19,6 +19,11 @@ import { synth } from "./audio";
 import { createShotPlan, nextProcDepth, objectiveComplete } from "./rules";
 import { applyMouseLook, cameraRelativeMove, horizontalBasis } from "./controls";
 import { getTololoRig, tololoMuzzleWorldFromPose } from "./tololo-visual";
+import {
+  applyChaserAngles, buildChaserVisual, chaserNewAnim, chaserPoseAngles,
+  chaserStepAnim, chaserWindup, CHASER_STRIKE_DUR,
+  type ChaserAnim, type ChaserJoints,
+} from "./chaser";
 
 export interface DamageNumber { pos: Vector3; text: string; crit: boolean; }
 export interface SimEvents {
@@ -56,6 +61,8 @@ interface Enemy {
   slowT: number; slowPct: number; stunT: number; markT: number; markMul: number;
   mesh: Mesh; bodyMat: StandardMaterial; baseEmissive: Color3; flashT: number;
   decideT: number; stuckT: number;
+  // Ordinary-chaser articulated visual (null = legacy/other kinds).
+  ch?: { joints: ChaserJoints; anim: ChaserAnim } | null;
   // boss state
   bossPhase: number; abilityT: number; abilityKind: number; telegraphT: number;
   Telegraph: Mesh | null;
@@ -71,6 +78,9 @@ export interface ShotDebug {
 }
 interface EnemyShot { pos: Vector3; vel: Vector3; life: number; dmg: number; mesh: Mesh; active: boolean; radius: number; }
 interface Tracer { mesh: Mesh; life: number; active: boolean; }
+interface Flash { mesh: Mesh; life: number; active: boolean; }
+interface Spark { mesh: Mesh; vel: Vector3; life: number; active: boolean; }
+interface Dying { mesh: Mesh; vest: StandardMaterial | null; t: number; duration: number; }
 interface Field {
   kind: "trap" | "snare" | "protect" | "bulwarkPulse" | "finale";
   pos: Vector3; radius: number; duration: number; age: number;
@@ -86,6 +96,16 @@ function stdMat(scene: Scene, name: string, c: Color3, e?: Color3): StandardMate
   if (e) m.emissiveColor = e;
   m.specularColor = new Color3(0.1, 0.1, 0.12);
   return m;
+}
+
+/** Presentation-only entry point on the existing spherical hit volume. */
+export function raySphereEntryPoint(origin: Vector3, dir: Vector3, center: Vector3, radius: number): Vector3 {
+  const toCenter = center.subtract(origin);
+  const centerT = toCenter.dot(dir);
+  const closest = origin.add(dir.scale(centerT));
+  const offSq = Math.min(radius * radius, closest.subtract(center).lengthSquared());
+  const entryT = Math.max(0, centerT - Math.sqrt(Math.max(0, radius * radius - offSq)));
+  return origin.add(dir.scale(entryT));
 }
 
 export class Simulation {
@@ -119,6 +139,9 @@ export class Simulation {
   orbs: Orb[] = [];
   eshots: EnemyShot[] = [];
   tracers: Tracer[] = [];
+  flashes: Flash[] = [];
+  sparks: Spark[] = [];
+  private dying: Dying[] = [];
   fields: Field[] = [];
   floatT = 0;
 
@@ -128,6 +151,8 @@ export class Simulation {
   /** Recent primary-shot records for the firing investigation harness. */
   shotLog: ShotDebug[] = [];
   private shotSeq = 0;
+  private gameplayState = (Math.random() * 0xffffffff) >>> 0 || 0x9e3779b9;
+  private cosmeticState = 0x6d2b79f5;
   spawnT = 2; spawnBudget = 0; difficulty = 1;
   relayActive = false; relayCharge = 0; bossSpawned = false; bossDead = false;
   bossRef: Enemy | null = null;
@@ -168,6 +193,7 @@ export class Simulation {
   invertLookY = false;
 
   godmode = false; // dev shortcut hooks (used only by debug query flags)
+  debugChaserVisuals = true; // harness switch for same-build perf comparison
   private interrupted = false;
 
   constructor(scene: Scene, world: WorldRefs, events: SimEvents, input: Input) {
@@ -183,6 +209,7 @@ export class Simulation {
     this.clearEntities();
     this.loop = loop;
     this.runTime = 0; this.stepCount = 0; this.shotLog = []; this.shotSeq = 0;
+    this.cosmeticState = 0x6d2b79f5;
     this.difficulty = difficultyAt(0, loop);
     this.relayActive = false; this.relayCharge = 0;
     this.bossSpawned = false; this.bossDead = false; this.bossRef = null;
@@ -421,15 +448,131 @@ export class Simulation {
       (m as Mesh).isPickable = false;
       this.tracers.push({ mesh: m, life: 0, active: false });
     }
+    // muzzle flash polyhedra (shared mats, restrained single-frame pops)
+    const flashMat = stdMat(this.scene, "flashM", new Color3(1, 0.6, 0.2), new Color3(1, 0.5, 0.12));
+    for (let i = 0; i < 4; i++) {
+      const m = MeshBuilder.CreateSphere(`flash-${i}`, { diameter: 0.5, segments: 2 }, this.scene);
+      m.material = flashMat;
+      m.scaling.set(0.7, 0.7, 1.4);
+      m.isVisible = false;
+      (m as Mesh).isPickable = false;
+      this.flashes.push({ mesh: m, life: 0, active: false });
+    }
+    const flashWhiteMat = stdMat(this.scene, "flashWM", new Color3(1, 1, 1), new Color3(1, 1, 1));
+    for (let i = 0; i < 2; i++) {
+      const m = MeshBuilder.CreateSphere(`flashW-${i}`, { diameter: 0.4, segments: 2 }, this.scene);
+      m.material = flashWhiteMat;
+      m.isVisible = false;
+      (m as Mesh).isPickable = false;
+      this.flashes.push({ mesh: m, life: 0, active: false });
+    }
+    // impact sparks (shared mat, gravity-driven, short-lived)
+    const sparkMat = stdMat(this.scene, "sparkM", new Color3(1, 0.7, 0.3), new Color3(1, 0.55, 0.15));
+    for (let i = 0; i < 16; i++) {
+      const m = MeshBuilder.CreateBox(`spark-${i}`, { width: 0.09, height: 0.09, depth: 0.09 }, this.scene);
+      m.material = sparkMat;
+      m.isVisible = false;
+      (m as Mesh).isPickable = false;
+      this.sparks.push({ mesh: m, vel: new Vector3(), life: 0, active: false });
+    }
+  }
+
+  /** Gameplay-only PRNG, isolated from rendering/audio allocation. */
+  gameplayRandom = (): number => {
+    let x = this.gameplayState | 0;
+    x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+    this.gameplayState = x >>> 0;
+    return this.gameplayState / 0x100000000;
+  };
+
+  setGameplaySeed(seed: number): void {
+    this.gameplayState = (seed >>> 0) || 0x9e3779b9;
+  }
+
+  private cosmeticRandom(): number {
+    let x = this.cosmeticState | 0;
+    x ^= x << 13; x ^= x >>> 17; x ^= x << 5;
+    this.cosmeticState = x >>> 0;
+    return this.cosmeticState / 0x100000000;
+  }
+
+  /** Restrained muzzle flash at the authoritative snapshot position. */
+  private spawnFlash(at: Vector3, dir: Vector3, white = false): void {
+    const matches = (x: Flash): boolean => x.mesh.name.startsWith("flashW") === white;
+    const f = this.flashes.find((x) => matches(x) && !x.active) ?? this.flashes.find(matches);
+    if (!f) return;
+    f.active = true; f.life = white ? 0.12 : 0.08;
+    f.mesh.isVisible = true;
+    f.mesh.position.copyFrom(at);
+    f.mesh.lookAt(at.add(dir));
+    f.mesh.rotate(Vector3.Up(), this.cosmeticRandom() * Math.PI, 0);
+  }
+
+  /** Impact burst at a hit location (3 chips, 6 + white core on crit). */
+  private impactBurst(at: Vector3, crit: boolean): void {
+    if (crit) this.spawnFlash(at, new Vector3(0, 1, 0), true);
+    const count = crit ? 6 : 3;
+    for (let i = 0; i < count; i++) {
+      const s = this.sparks.find((candidate) => !candidate.active)
+        ?? this.sparks.reduce((oldest, candidate) => candidate.life < oldest.life ? candidate : oldest);
+      s.active = true; s.life = 0.28;
+      s.mesh.isVisible = true;
+      s.mesh.position.copyFrom(at);
+      s.vel.set((this.cosmeticRandom() - 0.5) * 7, 1.5 + this.cosmeticRandom() * 4, (this.cosmeticRandom() - 0.5) * 7);
+      s.mesh.rotation.set(this.cosmeticRandom() * 3, this.cosmeticRandom() * 3, 0);
+    }
+  }
+
+  clearTransientPresentation(): void {
+    for (const t of this.tracers) { t.active = false; t.mesh.isVisible = false; }
+    for (const f of this.flashes) { f.active = false; f.mesh.isVisible = false; }
+    for (const s of this.sparks) { s.active = false; s.mesh.isVisible = false; }
+  }
+
+  private updateFx(dt: number): void {
+    for (const f of this.flashes) {
+      if (!f.active) continue;
+      f.life -= dt;
+      if (f.life <= 0) { f.active = false; f.mesh.isVisible = false; }
+    }
+    for (const s of this.sparks) {
+      if (!s.active) continue;
+      s.life -= dt;
+      if (s.life <= 0) { s.active = false; s.mesh.isVisible = false; continue; }
+      s.vel.y -= 22 * dt;
+      s.mesh.position.x += s.vel.x * dt;
+      s.mesh.position.y += s.vel.y * dt;
+      s.mesh.position.z += s.vel.z * dt;
+      if (s.mesh.position.y < 0.03) { s.mesh.position.y = 0.03; s.vel.y *= -0.4; }
+    }
+    // Death cleanup: fall + sink, then dispose the per-instance material.
+    for (let i = this.dying.length - 1; i >= 0; i--) {
+      const d = this.dying[i]!;
+      d.t -= dt;
+      const k = Math.max(0, d.t / d.duration);
+      d.mesh.rotation.x = -1.35 * (1 - k);
+      if (d.t < d.duration * 0.35) d.mesh.position.y -= dt * 0.8;
+      if (d.t <= 0) {
+        d.mesh.dispose(false, false);
+        d.vest?.dispose();
+        this.dying.splice(i, 1);
+      }
+    }
   }
 
   private clearEntities(): void {
-    for (const e of this.enemies) { e.mesh.dispose(false, true); e.Telegraph?.dispose(false, true); }
+    for (const e of this.enemies) {
+      e.mesh.dispose(false, !e.ch);
+      if (e.ch) e.bodyMat.dispose();
+      e.Telegraph?.dispose(false, true);
+    }
     this.enemies = [];
     this.bossRef = null;
+    for (const d of this.dying) { d.mesh.dispose(false, false); d.vest?.dispose(); }
+    this.dying = [];
     for (const o of this.orbs) { o.active = false; o.mesh.isVisible = false; }
     for (const s of this.eshots) { s.active = false; s.mesh.isVisible = false; }
-    for (const t of this.tracers) { t.active = false; t.mesh.isVisible = false; }
+    this.clearTransientPresentation();
     for (const f of this.fields) { f.mesh?.dispose(false, true); f.mesh2?.dispose(false, true); }
     this.fields = [];
     this.traps = []; this.protectFields = [];
@@ -451,6 +594,9 @@ export class Simulation {
     this.interrupted = false;
     this.stepCount++;
     this.runTime += dt;
+    // Age effects before producers so a fresh 50 ms flash survives every
+    // capped three-step catch-up frame and remains visible for one render.
+    this.updateFx(dt);
     this.difficulty = difficultyAt(this.runTime, this.loop);
     this.updatePlayer(dt);
     if (this.interrupted || !this.alive) return;
@@ -621,9 +767,9 @@ export class Simulation {
     );
     if (spreadDeg > 0) {
       const s = (spreadDeg * Math.PI) / 180;
-      dir.x += (Math.random() - 0.5) * 2 * s;
-      dir.y += (Math.random() - 0.5) * 2 * s;
-      dir.z += (Math.random() - 0.5) * 2 * s;
+      dir.x += (this.gameplayRandom() - 0.5) * 2 * s;
+      dir.y += (this.gameplayRandom() - 0.5) * 2 * s;
+      dir.z += (this.gameplayRandom() - 0.5) * 2 * s;
       dir.normalize();
     }
     return dir;
@@ -686,15 +832,16 @@ export class Simulation {
       tracers: 0, tracerA: null, tracerB: null,
     });
     if (this.shotLog.length > 8) this.shotLog.shift();
+    if (!isProc) this.spawnFlash(muzzle, baseDir);
     let anyHit = false, anyKill = false;
     let saturationImpact: Vector3 | null = null;
     for (let p = 0; p < plan.projectileCount; p++) {
       const dir = baseDir.clone();
       if (spread > 0) {
         const s = (spread * Math.PI) / 180;
-        dir.x += (Math.random() - 0.5) * 2 * s;
-        dir.y += (Math.random() - 0.5) * 2 * s;
-        dir.z += (Math.random() - 0.5) * 2 * s;
+        dir.x += (this.gameplayRandom() - 0.5) * 2 * s;
+        dir.y += (this.gameplayRandom() - 0.5) * 2 * s;
+        dir.z += (this.gameplayRandom() - 0.5) * 2 * s;
         dir.normalize();
       }
       const wallD = raycastSolid(muzzle, dir, def.weapon.range, this.world.colliders);
@@ -706,12 +853,15 @@ export class Simulation {
         continue;
       }
       for (const h of hits) {
-        const crit = def.weapon.critEligible && Math.random() < this.critCh();
+        const crit = def.weapon.critEligible && this.gameplayRandom() < this.critCh();
         const dmg = plan.damagePerProjectile * (crit ? this.critMult() : 1);
+        const center = new Vector3(h.pos.x, h.pos.y + 1.0, h.pos.z);
+        const hitAt = raySphereEntryPoint(muzzle, dir, center, h.radius + 0.55);
         const killed = this.damageEnemy(h, dmg, { direct: true, crit, isProc, knockback: def.weapon.type === "SG" ? 2.2 : 0 });
+        this.impactBurst(hitAt, crit);
         anyHit = true; if (killed) anyKill = true;
         saturationImpact ??= h.pos.clone();
-        this.spawnTracer(muzzle, new Vector3(h.pos.x, h.pos.y + 1.1, h.pos.z), shotId);
+        this.spawnTracer(muzzle, hitAt, shotId);
         const followDepth = nextProcDepth(isProc ? PROC.MAX_CHAIN : 0);
         if (followDepth !== null && !killed) {
           // Tololo overdrive bonus shot every 4th hit
@@ -798,7 +948,7 @@ export class Simulation {
           const wallD = raycastSolid(muzzle, dir, 80, this.world.colliders);
           const hits = this.rayEnemies(muzzle, dir, Math.min(wallD, 80), 1);
           const tgt = hits[0];
-          const crit = Math.random() < this.critCh();
+          const crit = this.gameplayRandom() < this.critCh();
           const dmg = this.totalAtk() * 2.2 * pow * (crit ? this.critMult() : 1);
           if (tgt) { this.damageEnemy(tgt, dmg, { direct: true, crit, isProc: true }); this.spawnTracer(muzzle, new Vector3(tgt.pos.x, tgt.pos.y + 1.1, tgt.pos.z)); }
           else this.spawnTracer(muzzle, muzzle.add(dir.scale(Math.min(wallD, 60))));
@@ -860,7 +1010,7 @@ export class Simulation {
         const hits = this.rayEnemies(muzzle, dir, Math.min(wallD, 110), 4 + (rank >= 3 ? 1 : 0) + (rank >= 5 ? 1 : 0));
         if (hits.length === 0) this.spawnTracer(muzzle, muzzle.add(dir.scale(Math.min(wallD, 80))));
         for (const h of hits) {
-          const crit = Math.random() < Math.min(1, this.critCh() + 0.15);
+          const crit = this.gameplayRandom() < Math.min(1, this.critCh() + 0.15);
           this.damageEnemy(h, this.totalAtk() * 3.0 * pow * (crit ? this.critMult() : 1), { direct: true, crit, isProc: true });
         this.spawnTracer(muzzle, new Vector3(h.pos.x, h.pos.y + 1.1, h.pos.z));
         }
@@ -891,7 +1041,7 @@ export class Simulation {
         const dir = this.muzzleDirToAim();
         const hits = this.coneEnemies(muzzle, dir, 14 + rank, rank >= 3 ? 65 : 55);
         for (const h of hits) {
-          const crit = Math.random() < this.critCh();
+          const crit = this.gameplayRandom() < this.critCh();
           this.damageEnemy(h, this.totalAtk() * 1.8 * pow * (crit ? this.critMult() : 1), { direct: true, crit, isProc: true, knockback: h.kind === "boss" ? 0 : 6, stun: rank >= 5 ? 1.4 : 0.9 });
         }
         synth.fire("SG");
@@ -1034,7 +1184,7 @@ export class Simulation {
     synth.explode();
     this.events.shake(0.4);
     // visual: expanding sphere flash (pooled tracer hack: use a temp mesh with disposal timer via fields)
-    const mesh = MeshBuilder.CreateSphere(`boom-${Date.now()}-${Math.floor(Math.random() * 1e6)}`, { diameter: radius * 1.2 }, this.scene);
+    const mesh = MeshBuilder.CreateSphere(`boom-${Date.now()}-${Math.floor(this.cosmeticRandom() * 1e6)}`, { diameter: radius * 1.2 }, this.scene);
     mesh.position = new Vector3(center.x, center.y + 1, center.z);
     mesh.material = stdMat(this.scene, `boomM-${Date.now()}`, new Color3(1, 0.6, 0.25), new Color3(1, 0.45, 0.15));
     this.fields.push({ kind: "bulwarkPulse", pos: center.clone(), radius: 0, duration: 0.22, age: 0, tickT: 0, power: 0, mesh, mesh2: null, triggered: false, owner: "fx" });
@@ -1045,7 +1195,7 @@ export class Simulation {
       const d = delta.length();
       if (d < radius + e.radius) {
         if (d > 0.01 && raycastSolid(blastOrigin, delta.scale(1 / d), d, this.world.colliders) < d - 0.6) continue;
-        const crit = Math.random() < this.critCh();
+        const crit = this.gameplayRandom() < this.critCh();
         this.damageEnemy(e, damage * (crit ? this.critMult() : 1), { crit, isProc: true, knockback: knockPlayerEnemies && e.kind !== "boss" ? 8 : 0, from: center });
       }
     }
@@ -1056,6 +1206,7 @@ export class Simulation {
     if (opts.direct && e.markT > 0) amount *= e.markMul;
     e.hp -= amount;
     e.flashT = 0.09;
+    if (e.ch) e.ch.anim.flinchT = Math.max(e.ch.anim.flinchT, 0.18);
     this.events.damageNumber({ pos: new Vector3(e.pos.x, e.pos.y + 2.2, e.pos.z), text: Math.round(amount).toString(), crit: !!opts.crit });
     if (opts.knockback && e.kind !== "boss" && !e.kbResist) {
       const away = opts.from ? new Vector3(e.pos.x - opts.from.x, 0, e.pos.z - opts.from.z) : new Vector3(e.pos.x - this.pos.x, 0, e.pos.z - this.pos.z);
@@ -1074,8 +1225,14 @@ export class Simulation {
     const idx = this.enemies.indexOf(e);
     if (idx < 0) return;
     this.enemies.splice(idx, 1);
-    e.mesh.dispose(false, true);
     e.Telegraph?.dispose(false, true);
+    if (e.ch) {
+      // Keep the articulated body briefly for a readable in-place death.
+      // It is no longer authoritative or collidable once removed above.
+      this.dying.push({ mesh: e.mesh, vest: e.bodyMat, t: 0.75, duration: 0.75 });
+    } else {
+      e.mesh.dispose(false, true);
+    }
     this.kills++;
     if (e.kind === "boss") {
       this.bossDead = true;
@@ -1091,11 +1248,11 @@ export class Simulation {
       return;
     }
     this.dropOrb(e.pos, e.elite ? ENEMIES[e.kind as EnemyKind].xp * 3 : ENEMIES[e.kind as EnemyKind].xp, false);
-    if (Math.random() < (e.elite ? 1.0 : 0.03)) {
+    if (this.gameplayRandom() < (e.elite ? 1.0 : 0.03)) {
       // attachment drop: elite always, normal rarely... normal heals instead
       if (e.elite) { this.elitesKilled++; this.dropAttachment(e.pos); }
       else this.dropOrb(e.pos, 0, true);
-    } else if (!e.elite && Math.random() < 0.06) {
+    } else if (!e.elite && this.gameplayRandom() < 0.06) {
       this.dropOrb(e.pos, 0, true);
     }
   }
@@ -1103,8 +1260,8 @@ export class Simulation {
   private dropOrb(pos: Vector3, value: number, heal: boolean): void {
     const o = this.orbs.find((candidate) => !candidate.active) ?? this.orbs.reduce((oldest, candidate) => candidate.life < oldest.life ? candidate : oldest);
     o.active = true; o.value = value; o.heal = heal; o.life = 40;
-    const ox = pos.x + (Math.random() - 0.5) * 1.5;
-    const oz = pos.z + (Math.random() - 0.5) * 1.5;
+    const ox = pos.x + (this.gameplayRandom() - 0.5) * 1.5;
+    const oz = pos.z + (this.gameplayRandom() - 0.5) * 1.5;
     o.pos.set(ox, groundHeightAt(ox, oz) + 1, oz);
     o.mesh.isVisible = true;
     o.mesh.position.copyFrom(o.pos);
@@ -1116,20 +1273,20 @@ export class Simulation {
   private dropAttachment(pos: Vector3): void {
     // rarity luck scales with time + loop
     const luck = Math.min(3, this.runTime / 240 + this.loop);
-    const rarity = rollRarity(Math.random, luck);
+    const rarity = rollRarity(this.gameplayRandom, luck);
     const slots = slotsFor(this.build.charId);
-    const slot = slots[Math.floor(Math.random() * slots.length)]!;
-    const def = rollAttachment(slot, rarity, Math.random, this.def.baseAtk);
+    const slot = slots[Math.floor(this.gameplayRandom() * slots.length)]!;
+    const def = rollAttachment(slot, rarity, this.gameplayRandom, this.def.baseAtk);
     // The renderer creates one marker per pending world drop.
     pendingAttachmentDrops.push({ pos: pos.clone(), def });
     this.events.toast(`Attachment dropped [${def.rarity}] — walk over (F near caches too)`);
   }
 
   private rollRarityLocal(luck: number): Rarity {
-    return rollRarity(Math.random, luck);
+    return rollRarity(this.gameplayRandom, luck);
   }
   private rollAttachmentLocal(slot: SlotKind, rarity: Rarity): AttachmentDef {
-    return rollAttachment(slot, rarity, Math.random, this.def.baseAtk);
+    return rollAttachment(slot, rarity, this.gameplayRandom, this.def.baseAtk);
   }
 
   // ----- director -----
@@ -1148,7 +1305,7 @@ export class Simulation {
     if (affordable.length === 0) return;
     // Weight toward affordable tougher units as pressure rises while retaining variety.
     affordable.sort((a, b) => ENEMIES[a].score - ENEMIES[b].score);
-    const bias = Math.pow(Math.random(), Math.max(0.35, 1.3 - this.difficulty * 0.08));
+    const bias = Math.pow(this.gameplayRandom(), Math.max(0.35, 1.3 - this.difficulty * 0.08));
     const kind = affordable[Math.min(affordable.length - 1, Math.floor(bias * affordable.length))]!;
     const spawned = this.spawnEnemy(kind);
     if (spawned) this.spawnBudget = Math.max(0, this.spawnBudget - ENEMIES[kind].score * (spawned.elite ? 1.8 : 1));
@@ -1158,7 +1315,7 @@ export class Simulation {
     const t = this.runTime;
     let kind: EnemyKind = forceKind ?? "chaser";
     if (!forceKind) {
-      const r = Math.random();
+      const r = this.gameplayRandom();
       const unlockRunner = t > 20, unlockSpitter = t > 75, unlockHeavy = t > 150;
       if (unlockHeavy && r < 0.12 + this.loop * 0.02) kind = "heavy";
       else if (unlockSpitter && r < 0.34) kind = "spitter";
@@ -1167,15 +1324,15 @@ export class Simulation {
     }
     const base = ENEMIES[kind];
     const scale = enemyScale(this.difficulty);
-    const elite = eliteOverride ?? Math.random() < Math.min(0.16, 0.03 + t / 900 + this.loop * 0.03 + (this.relayActive ? 0.04 : 0));
+    const elite = eliteOverride ?? this.gameplayRandom() < Math.min(0.16, 0.03 + t / 900 + this.loop * 0.03 + (this.relayActive ? 0.04 : 0));
     let pos: Vector3;
     if (forcePos) pos = forcePos.clone();
     else {
       // valid reachable ground outside safety radius 18, within 55
       let p: Vector3 | null = null;
       for (let tries = 0; tries < 12; tries++) {
-        const c = this.world.spawnPoints[Math.floor(Math.random() * this.world.spawnPoints.length)]!;
-        const jx = c.x + (Math.random() - 0.5) * 10, jz = c.z + (Math.random() - 0.5) * 10;
+        const c = this.world.spawnPoints[Math.floor(this.gameplayRandom() * this.world.spawnPoints.length)]!;
+        const jx = c.x + (this.gameplayRandom() - 0.5) * 10, jz = c.z + (this.gameplayRandom() - 0.5) * 10;
         const d = Math.hypot(jx - this.pos.x, jz - this.pos.z);
         if (d < 18 || d > 60) continue;
         const candidate = new Vector3(jx, groundHeightAt(jx, jz), jz);
@@ -1189,7 +1346,7 @@ export class Simulation {
     pos.y = groundHeightAt(pos.x, pos.z);
     const e = this.makeEnemyMesh(kind, elite, pos);
     e.hp = e.maxHp = Math.round(base.hp * scale.hpMul * (elite ? 2.4 : 1) * (1 + this.loop * 0.5));
-    e.speed = base.speed * (elite ? 1.1 : 1) * (0.9 + Math.random() * 0.2);
+    e.speed = base.speed * (elite ? 1.1 : 1) * (0.9 + this.gameplayRandom() * 0.2);
     e.damage = Math.round(base.damage * scale.dmgMul * (elite ? 1.4 : 1));
     e.attackCd = base.attackCd; e.attackRange = base.attackRange;
     this.enemies.push(e);
@@ -1200,23 +1357,52 @@ export class Simulation {
     const s = this.scene;
     const root = new Mesh(`enemy-${nextId++}`, s);
     let body: Mesh;
-    let color: Color3, emis: Color3;
+    let color = new Color3(0.75, 0.2, 0.2);
+    let emis = new Color3(0.4, 0.05, 0.05);
     let radius = 0.7;
-    if (kind === "chaser") { color = new Color3(0.75, 0.2, 0.2); emis = new Color3(0.4, 0.05, 0.05); body = MeshBuilder.CreateBox("b", { width: 1.1, height: 1.5, depth: 0.9 }, s); body.position.y = 1.0; radius = 0.7; }
-    else if (kind === "runner") { color = new Color3(1, 0.55, 0.2); emis = new Color3(0.5, 0.2, 0.05); body = MeshBuilder.CreateSphere("b", { diameter: 1.0 }, s); body.position.y = 0.8; radius = 0.55; }
-    else if (kind === "spitter") { color = new Color3(0.6, 0.3, 0.9); emis = new Color3(0.3, 0.1, 0.5); body = MeshBuilder.CreateCylinder("b", { height: 1.9, diameterTop: 0.7, diameterBottom: 1.1 }, s); body.position.y = 1.1; radius = 0.65; }
-    else if (kind === "heavy") { color = new Color3(0.5, 0.12, 0.15); emis = new Color3(0.35, 0.08, 0.08); body = MeshBuilder.CreateBox("b", { width: 1.9, height: 2.4, depth: 1.6 }, s); body.position.y = 1.4; radius = 1.1; }
-    else { color = new Color3(0.9, 0.15, 0.3); emis = new Color3(0.6, 0.1, 0.2); body = MeshBuilder.CreateCylinder("b", { height: 3.2, diameterTop: 1.6, diameterBottom: 2.4 }, s); body.position.y = 1.8; radius = 1.6; }
-    body.parent = root;
-    const m = stdMat(s, `emat-${nextId}`, elite ? new Color3(1, 0.8, 0.3) : color, elite ? new Color3(0.5, 0.35, 0.1) : emis);
-    body.material = m;
-    const eye = MeshBuilder.CreateSphere("eye", { diameter: 0.3 }, s);
-    eye.parent = root; eye.position.y = kind === "boss" ? 2.6 : 1.5; eye.position.z = -0.55;
-    eye.material = stdMat(s, `eye-${nextId}`, new Color3(1, 0.9, 0.4), new Color3(1, 0.7, 0.2));
+    let m: StandardMaterial | null = null;
+    let ch: Enemy["ch"] = null;
+    if (kind === "chaser" && this.debugChaserVisuals) {
+      radius = 0.7;
+      try {
+        // Original articulated trooper; any failure keeps the legacy box.
+        const built = buildChaserVisual(s, root, elite);
+        body = built.joints.vestMesh;
+        m = built.vestMat;
+        emis = m.emissiveColor.clone();
+        color = elite ? new Color3(1, 0.8, 0.3) : new Color3(0.3, 0.3, 0.33);
+        ch = { joints: built.joints, anim: chaserNewAnim() };
+      } catch (err) {
+        console.warn("[chaser] articulated visual failed; using legacy fallback", err);
+        // The builder is transactional; this guards only unexpected leftovers.
+        for (const child of root.getChildren()) child.dispose(false);
+        ch = null;
+      }
+    }
+    if (!ch) {
+      if (kind === "chaser") { color = new Color3(0.75, 0.2, 0.2); emis = new Color3(0.4, 0.05, 0.05); body = MeshBuilder.CreateBox("b", { width: 1.1, height: 1.5, depth: 0.9 }, s); body.position.y = 1.0; radius = 0.7; }
+      else if (kind === "runner") { color = new Color3(1, 0.55, 0.2); emis = new Color3(0.5, 0.2, 0.05); body = MeshBuilder.CreateSphere("b", { diameter: 1.0 }, s); body.position.y = 0.8; radius = 0.55; }
+      else if (kind === "spitter") { color = new Color3(0.6, 0.3, 0.9); emis = new Color3(0.3, 0.1, 0.5); body = MeshBuilder.CreateCylinder("b", { height: 1.9, diameterTop: 0.7, diameterBottom: 1.1 }, s); body.position.y = 1.1; radius = 0.65; }
+      else if (kind === "heavy") { color = new Color3(0.5, 0.12, 0.15); emis = new Color3(0.35, 0.08, 0.08); body = MeshBuilder.CreateBox("b", { width: 1.9, height: 2.4, depth: 1.6 }, s); body.position.y = 1.4; radius = 1.1; }
+      else { color = new Color3(0.9, 0.15, 0.3); emis = new Color3(0.6, 0.1, 0.2); body = MeshBuilder.CreateCylinder("b", { height: 3.2, diameterTop: 1.6, diameterBottom: 2.4 }, s); body.position.y = 1.8; radius = 1.6; }
+    }
+    // Articulated Chaser keeps its joint hierarchy + body material untouched.
+    const mat = m ?? stdMat(s, `emat-${nextId}`, elite ? new Color3(1, 0.8, 0.3) : color!, elite ? new Color3(0.5, 0.35, 0.1) : emis!);
+    if (!ch) {
+      body!.parent = root;
+      body!.material = mat;
+    }
+    if (!ch) {
+      const eye = MeshBuilder.CreateSphere("eye", { diameter: 0.3 }, s);
+      eye.parent = root; eye.position.y = kind === "boss" ? 2.6 : 1.5; eye.position.z = -0.55;
+      eye.material = stdMat(s, `eye-${nextId}`, new Color3(1, 0.9, 0.4), new Color3(1, 0.7, 0.2));
+    }
     if (elite) {
-      const crown = MeshBuilder.CreateTorus(`crown`, { diameter: 1.6, thickness: 0.18 }, s);
-      crown.parent = root; crown.position.y = 2.4;
-      crown.material = stdMat(s, `crownM-${nextId}`, new Color3(1, 0.85, 0.35), new Color3(0.9, 0.6, 0.15));
+      if (!ch) {
+        const crown = MeshBuilder.CreateTorus(`crown`, { diameter: 1.6, thickness: 0.18 }, s);
+        crown.parent = root; crown.position.y = kind === "chaser" ? 2.25 : 2.4;
+        crown.material = stdMat(s, `crownM-${nextId}`, new Color3(1, 0.85, 0.35), new Color3(0.9, 0.6, 0.15));
+      }
       root.scaling.setAll(1.22);
     }
     if (kind === "boss") root.scaling.setAll(1.3);
@@ -1224,9 +1410,10 @@ export class Simulation {
     return {
       id: nextId++, kind, elite, pos: pos.clone(), vel: new Vector3(), yaw: 0,
       hp: 10, maxHp: 10, speed: 4, damage: 10, radius,
-      attackT: 1 + Math.random(), attackCd: 1.5, attackRange: 2.2,
+      attackT: 1 + this.gameplayRandom(), attackCd: 1.5, attackRange: 2.2,
       slowT: 0, slowPct: 0, stunT: 0, markT: 0, markMul: 1,
-      mesh: root, bodyMat: m, baseEmissive: (elite ? new Color3(0.5, 0.35, 0.1) : emis).clone(), flashT: 0, decideT: Math.random() * 0.3, stuckT: 0,
+      mesh: root, bodyMat: mat, baseEmissive: (ch ? emis : elite ? new Color3(0.5, 0.35, 0.1) : emis).clone(), flashT: 0, decideT: this.gameplayRandom() * 0.3, stuckT: 0,
+      ch: ch ?? null,
       bossPhase: 0, abilityT: 4, abilityKind: 0, telegraphT: 0, Telegraph: null,
       kbResist: kind === "boss" || kind === "heavy",
     };
@@ -1261,6 +1448,7 @@ export class Simulation {
     }
     for (const e of [...this.enemies]) {
       if (!this.enemies.includes(e)) continue;
+      if (e.ch) { e.ch.anim.moveX = 0; e.ch.anim.moveZ = 0; }
       e.flashT = Math.max(0, e.flashT - dt);
       e.slowT = Math.max(0, e.slowT - dt);
       e.stunT = Math.max(0, e.stunT - dt);
@@ -1309,7 +1497,7 @@ export class Simulation {
           const tgt = new Vector3(this.pos.x, this.pos.y + 1.2, this.pos.z);
           const d = tgt.subtract(from); const distT = d.length(); const dd = d.scale(1 / distT);
           if (raycastSolid(from, dd, distT, this.world.colliders) >= distT - 0.5) {
-            e.attackT = e.attackCd * (0.9 + Math.random() * 0.3);
+            e.attackT = e.attackCd * (0.9 + this.gameplayRandom() * 0.3);
             this.fireEnemyShot(e, tgt);
           } else e.attackT = 0.4;
         }
@@ -1351,6 +1539,7 @@ export class Simulation {
         this.moveEnemy(e, dir.x, dir.z, e.speed * slowed * dt);
         if (dist < e.attackRange && Math.abs(this.pos.y - e.pos.y) < 2.4 && e.attackT <= 0) {
           e.attackT = e.attackCd;
+          if (e.ch) e.ch.anim.strikeT = CHASER_STRIKE_DUR;
           this.damagePlayer(e.damage);
         }
       }
@@ -1415,7 +1604,9 @@ export class Simulation {
 
     const sx = e.pos.x, sz = e.pos.z;
     moveHorizontalSafe(e.pos, mx * moveDistance, mz * moveDistance, e.radius, this.world.colliders, this.world.bounds);
-    const moved = Math.hypot(e.pos.x - sx, e.pos.z - sz);
+    const movedX = e.pos.x - sx, movedZ = e.pos.z - sz;
+    const moved = Math.hypot(movedX, movedZ);
+    if (e.ch) { e.ch.anim.moveX += movedX; e.ch.anim.moveZ += movedZ; }
     if (moved < moveDistance * 0.15) e.stuckT += STEP_SIZE;
     else e.stuckT = Math.max(0, e.stuckT - STEP_SIZE * 2);
 
@@ -1432,12 +1623,36 @@ export class Simulation {
 
   private syncEnemyMesh(e: Enemy, dt: number): void {
     e.mesh.position.set(e.pos.x, e.pos.y, e.pos.z);
-    const to = new Vector3(this.pos.x - e.pos.x, 0, this.pos.z - e.pos.z);
-    if (to.lengthSquared() > 0.01) e.yaw = Math.atan2(-to.x, -to.z);
+    const toPlayer = new Vector3(this.pos.x - e.pos.x, 0, this.pos.z - e.pos.z);
+    if (e.ch) {
+      const a = e.ch.anim;
+      const moved = Math.hypot(a.moveX, a.moveZ);
+      const actualSpeed = dt > 0 ? moved / dt : 0;
+      const holdFacing = a.strikeT > 0 || a.flinchT > 0 || e.stunT > 0;
+      if (!holdFacing && moved > 0.001) e.yaw = Math.atan2(-a.moveX, -a.moveZ);
+      else if (toPlayer.lengthSquared() > 0.01) e.yaw = Math.atan2(-toPlayer.x, -toPlayer.z);
+      chaserStepAnim(a, dt, actualSpeed);
+      const distance = toPlayer.length();
+      const strikeActive = a.strikeT > 0;
+      const farLod = distance > 28;
+      e.ch.joints.hips.setEnabled(!farLod);
+      e.ch.joints.lodMesh.setEnabled(farLod);
+      applyChaserAngles(e.ch.joints, chaserPoseAngles({
+        speedFactor: a.speedSm,
+        phase: a.phase,
+        time: this.runTime + e.id * 0.17,
+        windup: strikeActive ? 0 : chaserWindup(distance, e.attackRange, e.attackT),
+        strike: strikeActive ? 1 - a.strikeT / CHASER_STRIKE_DUR : 0,
+        flinch: a.flinchT / 0.18,
+        stunned: e.stunT > 0,
+      }));
+    } else if (toPlayer.lengthSquared() > 0.01) {
+      e.yaw = Math.atan2(-toPlayer.x, -toPlayer.z);
+    }
     e.mesh.rotation.y = e.yaw;
-    // walk bob
-    e.mesh.position.y += Math.abs(Math.sin(this.runTime * 8 + e.id)) * 0.06;
-    void dt;
+    // Legacy silhouettes keep their old walk bob. Articulated feet remain
+    // grounded while locomotion is applied only to the joint hierarchy.
+    if (!e.ch) e.mesh.position.y += Math.abs(Math.sin(this.runTime * 8 + e.id)) * 0.06;
   }
 
   private fireEnemyShot(e: Enemy, tgt: Vector3): void {
@@ -1473,7 +1688,7 @@ export class Simulation {
           // radial volley
           const n = BOSS_DEF.volleyCount + e.bossPhase * 3;
           for (let i = 0; i < n; i++) {
-            const a = (i / n) * Math.PI * 2 + Math.random() * 0.3;
+            const a = (i / n) * Math.PI * 2 + this.gameplayRandom() * 0.3;
             const s = this.eshots.find((shot) => !shot.active) ?? this.eshots.reduce((oldest, shot) => shot.life < oldest.life ? shot : oldest);
             s.active = true; s.life = 5; s.dmg = e.damage;
             s.pos.set(e.pos.x, e.pos.y + 2, e.pos.z);
@@ -1484,10 +1699,10 @@ export class Simulation {
         } else {
           // summon adds (bounded)
           for (let i = 0; i < BOSS_DEF.summonCount + e.bossPhase && this.enemies.length < 30; i++) {
-            const a = Math.random() * Math.PI * 2;
+            const a = this.gameplayRandom() * Math.PI * 2;
             const p = new Vector3(e.pos.x + Math.cos(a) * 5, 0, e.pos.z + Math.sin(a) * 5);
             p.y = groundHeightAt(p.x, p.z);
-            this.spawnEnemy(Math.random() < 0.5 ? "chaser" : "runner", p, false);
+            this.spawnEnemy(this.gameplayRandom() < 0.5 ? "chaser" : "runner", p, false);
           }
           this.events.toast("Warden calls reinforcements!");
         }
@@ -1674,7 +1889,7 @@ export class Simulation {
           const dist = aim.subtract(from).length();
           this.spawnTracer(from, aim);
           if (wallD >= dist - 0.5) {
-            const crit = Math.random() < this.critCh();
+            const crit = this.gameplayRandom() < this.critCh();
             const dmg = this.totalAtk() * v.power * (crit ? this.critMult() : 1);
             this.damageEnemy(t, dmg, { direct: true, crit, isProc: true });
           }
@@ -1685,7 +1900,7 @@ export class Simulation {
         const m = this.muzzlePos();
         const dir = new Vector3(v.dirX ?? -Math.sin(this.yaw), 0, v.dirZ ?? -Math.cos(this.yaw)).normalize();
         for (const h of this.coneEnemies(m, dir, 20, v.cone ?? 28)) {
-          const crit = Math.random() < this.critCh();
+          const crit = this.gameplayRandom() < this.critCh();
           this.damageEnemy(h, this.totalAtk() * v.power * (crit ? this.critMult() : 1), { direct: true, crit, isProc: true });
         }
         this.spawnTracer(m, m.add(dir.scale(16)));
@@ -1745,7 +1960,7 @@ export class Simulation {
         const luck = Math.min(2.5, 0.4 + this.cachesOpened * 0.25 + this.loop);
         const rarity = this.rollRarityLocal(luck);
         const slots = slotsFor(this.build.charId);
-        const slot = slots[Math.floor(Math.random() * slots.length)]!;
+        const slot = slots[Math.floor(this.gameplayRandom() * slots.length)]!;
         const def = this.rollAttachmentLocal(slot, rarity);
         synth.levelup();
         this.interrupted = true;
@@ -1827,8 +2042,8 @@ export class Simulation {
     Vector3.LerpToRef(this.camPos, desired, Math.min(1, k), this.camPos);
     Vector3.LerpToRef(this.camTarget, pivot.add(dir.scale(8)), Math.min(1, k), this.camTarget);
     if (shakeEnabled && this.shakeAmt > 0.003) {
-      this.camPos.x += (Math.random() - 0.5) * this.shakeAmt;
-      this.camPos.y += (Math.random() - 0.5) * this.shakeAmt;
+      this.camPos.x += (this.cosmeticRandom() - 0.5) * this.shakeAmt;
+      this.camPos.y += (this.cosmeticRandom() - 0.5) * this.shakeAmt;
     }
     this.shakeAmt *= Math.pow(0.02, rdt);
   }

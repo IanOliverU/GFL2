@@ -688,7 +688,9 @@ export function buildGreenZone(scene: Scene, colliders: AABB[]): void {
   scene.fogColor = new Color3(0.78, 0.86, 0.89);
   scene.clearColor.set(0.78, 0.86, 0.89, 1);
   buildSky(scene, new Vector3(-0.45, 0.62, 0.34));
-  buildClouds(scene);
+  // Crossed alpha-plane clouds are temporarily disabled: on some renderers
+  // their transparent texture presented as dark X-shaped silhouettes. The
+  // existing gradient sky remains the bounded, readable fallback.
   const b = new GzBatch(scene);
   buildGround(b, mats);
   buildBuildingWest(b, mats, colliders, rnd);
