@@ -18,6 +18,7 @@ import { controllerGroundHeightAt, groundHeightAt, isGroundSpawnValid, moveHoriz
 import { synth } from "./audio";
 import { createShotPlan, nextProcDepth, objectiveComplete } from "./rules";
 import { applyMouseLook, cameraRelativeMove, horizontalBasis } from "./controls";
+import { getTololoRig, tololoMuzzleWorldFromPose } from "./tololo-visual";
 
 export interface DamageNumber { pos: Vector3; text: string; crit: boolean; }
 export interface SimEvents {
@@ -62,6 +63,12 @@ interface Enemy {
 }
 
 interface Orb { pos: Vector3; value: number; mesh: Mesh; life: number; active: boolean; heal: boolean; }
+/** Firing-frame debug record: one entry per primary shot (ring of 8). */
+export interface ShotDebug {
+  id: number; step: number; frameMs: number;
+  muzzle: Vector3; aim: Vector3; dir: Vector3;
+  tracers: number; tracerA: Vector3 | null; tracerB: Vector3 | null;
+}
 interface EnemyShot { pos: Vector3; vel: Vector3; life: number; dmg: number; mesh: Mesh; active: boolean; radius: number; }
 interface Tracer { mesh: Mesh; life: number; active: boolean; }
 interface Field {
@@ -116,6 +123,11 @@ export class Simulation {
   floatT = 0;
 
   runTime = 0; loop = 0;
+  /** Fixed-step counter (tick identity for firing-frame correlation). */
+  stepCount = 0;
+  /** Recent primary-shot records for the firing investigation harness. */
+  shotLog: ShotDebug[] = [];
+  private shotSeq = 0;
   spawnT = 2; spawnBudget = 0; difficulty = 1;
   relayActive = false; relayCharge = 0; bossSpawned = false; bossDead = false;
   bossRef: Enemy | null = null;
@@ -170,7 +182,8 @@ export class Simulation {
     const def = getCharacter(charId);
     this.clearEntities();
     this.loop = loop;
-    this.runTime = 0; this.difficulty = difficultyAt(0, loop);
+    this.runTime = 0; this.stepCount = 0; this.shotLog = []; this.shotSeq = 0;
+    this.difficulty = difficultyAt(0, loop);
     this.relayActive = false; this.relayCharge = 0;
     this.bossSpawned = false; this.bossDead = false; this.bossRef = null;
     this.kills = 0; this.elitesKilled = 0; this.cachesOpened = 0;
@@ -436,6 +449,7 @@ export class Simulation {
   update(dt: number): void {
     if (!this.alive) return;
     this.interrupted = false;
+    this.stepCount++;
     this.runTime += dt;
     this.difficulty = difficultyAt(this.runTime, this.loop);
     this.updatePlayer(dt);
@@ -574,11 +588,20 @@ export class Simulation {
   }
 
   muzzlePos(): Vector3 {
-    // Honest origin: the visible barrel tip when the Tololo hold is driving
-    // it (written per-frame by the visual tick); otherwise the legacy
-    // hip-height formula. Only the ray START moves — direction is recomputed
-    // muzzle -> aim point at every call site, so damage, cadence, spread,
-    // range, and wall/enemy tests behave identically.
+    // Honest origin, computed synchronously from the CURRENT authoritative
+    // (pos/yaw/pitch) state — never a previous frame's pose. The visual tick
+    // writes muzzleOverride as a fallback (rest not yet measured, etc.);
+    // otherwise the legacy hip-height formula. Only the ray START moves —
+    // direction is recomputed muzzle -> aim point at every call site, so
+    // damage, cadence, spread, range, and wall/enemy tests behave identically.
+    if (this.externalStatus === "pmx" && this.externalRoot) {
+      const rig = getTololoRig(this.externalRoot);
+      if (rig?.rest) {
+        const out = new Vector3();
+        if (tololoMuzzleWorldFromPose(rig, this.weaponMount.scaling.x || 0.6,
+          this.pos, this.yaw, this.pitch, out)) return out;
+      }
+    }
     if (this.muzzleOverride) return this.muzzleOverride.clone();
     const f = new Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const r = new Vector3(-f.z, 0, f.x);
@@ -653,6 +676,16 @@ export class Simulation {
     const toAim = this.aimPoint.subtract(muzzle);
     const distAim = toAim.length();
     const baseDir = distAim > 0.001 ? toAim.scale(1 / distAim) : this.aimDir(0);
+    // One consistent firing snapshot for this shot: hit detection, tracers,
+    // and any muzzle effect share these COPIES (pooled effects never retain
+    // the live transform). Existing shots continue independently afterwards.
+    const shotId = ++this.shotSeq;
+    this.shotLog.push({
+      id: shotId, step: this.stepCount, frameMs: performance.now(),
+      muzzle: muzzle.clone(), aim: this.aimPoint.clone(), dir: baseDir.clone(),
+      tracers: 0, tracerA: null, tracerB: null,
+    });
+    if (this.shotLog.length > 8) this.shotLog.shift();
     let anyHit = false, anyKill = false;
     let saturationImpact: Vector3 | null = null;
     for (let p = 0; p < plan.projectileCount; p++) {
@@ -669,7 +702,7 @@ export class Simulation {
       const hits = this.rayEnemies(muzzle, dir, Math.min(wallD, def.weapon.range), plan.maxTargetsPerProjectile);
       if (hits.length === 0) {
         const end = muzzle.add(dir.scale(Math.min(wallD, def.weapon.range)));
-        this.spawnTracer(muzzle, end);
+        this.spawnTracer(muzzle, end, shotId);
         continue;
       }
       for (const h of hits) {
@@ -678,7 +711,7 @@ export class Simulation {
         const killed = this.damageEnemy(h, dmg, { direct: true, crit, isProc, knockback: def.weapon.type === "SG" ? 2.2 : 0 });
         anyHit = true; if (killed) anyKill = true;
         saturationImpact ??= h.pos.clone();
-        this.spawnTracer(muzzle, new Vector3(h.pos.x, h.pos.y + 1.1, h.pos.z));
+        this.spawnTracer(muzzle, new Vector3(h.pos.x, h.pos.y + 1.1, h.pos.z), shotId);
         const followDepth = nextProcDepth(isProc ? PROC.MAX_CHAIN : 0);
         if (followDepth !== null && !killed) {
           // Tololo overdrive bonus shot every 4th hit
@@ -721,7 +754,14 @@ export class Simulation {
     return out.slice(0, Math.max(1, maxHits)).map((o) => o.e);
   }
 
-  private spawnTracer(a: Vector3, b: Vector3): void {
+  private spawnTracer(a: Vector3, b: Vector3, shotId?: number): void {
+    if (shotId !== undefined) {
+      const log = this.shotLog.find((e) => e.id === shotId);
+      if (log) {
+        log.tracers++;
+        if (!log.tracerA) { log.tracerA = a.clone(); log.tracerB = b.clone(); }
+      }
+    }
     const t = this.tracers.find((t) => !t.active);
     if (!t) return;
     t.active = true; t.life = 0.07;
@@ -822,7 +862,7 @@ export class Simulation {
         for (const h of hits) {
           const crit = Math.random() < Math.min(1, this.critCh() + 0.15);
           this.damageEnemy(h, this.totalAtk() * 3.0 * pow * (crit ? this.critMult() : 1), { direct: true, crit, isProc: true });
-          this.spawnTracer(muzzle, new Vector3(h.pos.x, h.pos.y + 1.1, h.pos.z));
+        this.spawnTracer(muzzle, new Vector3(h.pos.x, h.pos.y + 1.1, h.pos.z));
         }
         synth.fire("RF");
         this.events.shake(0.35);

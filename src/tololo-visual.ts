@@ -655,6 +655,17 @@ const _c = /* @__PURE__ */ Vector3.Zero();
 const _d = /* @__PURE__ */ Vector3.Zero();
 const _e = /* @__PURE__ */ Vector3.Zero();
 const _f = /* @__PURE__ */ Vector3.Zero();
+// Dedicated mount scratch: solveHoldArm reuses _a.._f, so the mount position
+// must never live in shared scratch across a solve call (a clobbered mount
+// once sent the muzzle override to the ground — see §14).
+const _mountPos = /* @__PURE__ */ Vector3.Zero();
+const _wpA = /* @__PURE__ */ Vector3.Zero();
+const _wpB = /* @__PURE__ */ Vector3.Zero();
+const _wpC = /* @__PURE__ */ Vector3.Zero();
+const _mpM = /* @__PURE__ */ Vector3.Zero();
+const _mpM2 = /* @__PURE__ */ Vector3.Zero();
+const _mpM3 = /* @__PURE__ */ Vector3.Zero();
+const _mpQ = /* @__PURE__ */ Quaternion.Identity();
 
 function readBoneModel(rig: TololoRig, name: string, out: Vector3): boolean {
   const b = rig.bones.get(name);
@@ -781,6 +792,43 @@ function solveHoldArm(
 }
 
 /**
+ * Single source of truth for the held weapon transform (player space):
+ * stock welded to the right-shoulder pocket, barrel +Z pitched with the
+ * look (muzzle up on +pitch). Used by the visual tick AND by the
+ * synchronous fire-time muzzle computation, so shots can never observe a
+ * stale pose. Own scratch only — safe to call anywhere.
+ */
+export function tololoWeaponPose(
+  rest: TololoRestPose, scale: number, lift: number, ms: number, pitch: number,
+  outMount: Vector3, outQuat: Quaternion,
+): void {
+  const p = tololoHoldParams;
+  Quaternion.RotationYawPitchRollToRef(0, -pitch, 0, outQuat);
+  tololoModelToPlayer(rest.shoulderR.x, rest.shoulderR.y, rest.shoulderR.z, scale, lift, _wpA);
+  _wpA.x -= p.stockIn; _wpA.y += p.stockUp; _wpA.z += p.stockFwd;
+  _wpB.set(STOCK_LOCAL.x * ms, STOCK_LOCAL.y * ms, STOCK_LOCAL.z * ms);
+  _wpB.applyRotationQuaternionToRef(outQuat, _wpC);
+  outMount.copyFrom(_wpA).subtractInPlace(_wpC);
+}
+
+/**
+ * Synchronous barrel-tip world position from the current authoritative
+ * (pos/yaw/pitch) state. No IK, no model update, no scene graph reads —
+ * cheap enough to call per shot so firing never uses a previous frame.
+ */
+export function tololoMuzzleWorldFromPose(
+  rig: TololoRig, ms: number, pos: Vector3, yaw: number, pitch: number, out: Vector3,
+): boolean {
+  if (!rig.rest) return false;
+  tololoWeaponPose(rig.rest, rig.scale, rig.lift, ms, pitch, _mpM, _mpQ);
+  _mpM2.set(MUZZLE_LOCAL.x * ms, MUZZLE_LOCAL.y * ms, MUZZLE_LOCAL.z * ms);
+  _mpM2.applyRotationQuaternionToRef(_mpQ, _mpM3);
+  _mpM3.addInPlace(_mpM);
+  tololoPlayerToWorld(_mpM3.x, _mpM3.y, _mpM3.z, pos, yaw, out);
+  return true;
+}
+
+/**
  * Static hold tick: weapon follows the right-shoulder pocket + aim pitch;
  * both arms follow the weapon anchors via IK; fingers are static curls.
  * Writes sim.muzzleOverride (honest barrel-tip origin) and contact markers.
@@ -805,24 +853,19 @@ export function tickTololoStaticHold(
   setBoneRotation(rig, "左ひざ", 0, p.kneeBend, 0);
   setBoneRotation(rig, "右ひざ", 0, p.kneeBend, 0);
 
-  // Weapon orientation: barrel +Z pitched with the look (muzzle up on +pitch).
-  Quaternion.RotationYawPitchRollToRef(0, -s.pitch, 0, _hq);
-  // Stock welded to the right-shoulder pocket; mount backs out from there.
-  tololoModelToPlayer(rest.shoulderR.x, rest.shoulderR.y, rest.shoulderR.z, rig.scale, rig.lift, _a);
-  _b.set(_a.x - p.stockIn, _a.y + p.stockUp, _a.z + p.stockFwd);
-  _c.set(STOCK_LOCAL.x * ms, STOCK_LOCAL.y * ms, STOCK_LOCAL.z * ms)
-    .applyRotationQuaternionToRef(_hq, _d);
-  _e.copyFrom(_b).subtractInPlace(_d); // mount position (player)
-  sim.weaponMount.position.copyFrom(_e);
+  // Weapon pose from the single shared source (pocket + pitch); the mount
+  // lives in dedicated scratch across the IK solves below.
+  tololoWeaponPose(rest, rig.scale, rig.lift, ms, s.pitch, _mountPos, _hq);
+  sim.weaponMount.position.copyFrom(_mountPos);
   sim.weaponMount.rotation.set(-s.pitch, 0, 0);
 
   // Anchors to player space, then to model space for the solver.
   _a.set(MAIN_LOCAL.x * ms, MAIN_LOCAL.y * ms, MAIN_LOCAL.z * ms)
     .applyRotationQuaternionToRef(_hq, _c);
-  _c.addInPlace(_e);
+  _c.addInPlace(_mountPos);
   _a.set(SUP_LOCAL.x * ms, SUP_LOCAL.y * ms, SUP_LOCAL.z * ms)
     .applyRotationQuaternionToRef(_hq, _d);
-  _d.addInPlace(_e);
+  _d.addInPlace(_mountPos);
   const mainM = tololoPlayerToModel(_c.x, _c.y, _c.z, rig.scale, rig.lift, new Vector3());
   const supM = tololoPlayerToModel(_d.x, _d.y, _d.z, rig.scale, rig.lift, new Vector3());
   const poleRM = new Vector3(-p.poleR.x, p.poleR.y, -p.poleR.z).normalize();
@@ -861,7 +904,7 @@ export function tickTololoStaticHold(
   // Honest muzzle: manual player->world (no reliance on scene graph freshness).
   _a.set(MUZZLE_LOCAL.x * ms, MUZZLE_LOCAL.y * ms, MUZZLE_LOCAL.z * ms)
     .applyRotationQuaternionToRef(_hq, _b);
-  _b.addInPlace(_e);
+  _b.addInPlace(_mountPos);
   const muzzleWorld = tololoPlayerToWorld(_b.x, _b.y, _b.z, sim.pos, sim.yaw, new Vector3());
   sim.muzzleOverride = muzzleWorld;
 }

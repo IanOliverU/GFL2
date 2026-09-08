@@ -7,6 +7,7 @@ import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import { dressCourtyard } from "./courtyard";
+import { buildGreenZone } from "./greenzone";
 
 export interface AABB { min: Vector3; max: Vector3; }
 
@@ -178,12 +179,13 @@ export function buildWorld(scene: Scene): WorldRefs {
   // --- ground ---
   const ground = MeshBuilder.CreateGround("ground", { width: 150, height: 150 }, scene);
   ground.material = mat(scene, "gnd", new Color3(0.13, 0.15, 0.19));
-  ground.receiveShadows = false;
+  ground.receiveShadows = true;
   ground.checkCollisions = false;
 
   // yard painted plaza
   const plaza = MeshBuilder.CreateDisc("plaza", { radius: 16, tessellation: 48 }, scene);
   plaza.rotation.x = -Math.PI / 2;
+  plaza.receiveShadows = true;
   plaza.position = new Vector3(0, 0.02, 2);
   plaza.material = mat(scene, "plaza", new Color3(0.16, 0.19, 0.24), new Color3(0.02, 0.03, 0.05));
 
@@ -206,6 +208,7 @@ export function buildWorld(scene: Scene): WorldRefs {
   // --- elevated walkway deck (north) + rails + pillars ---
   const deckMat = mat(scene, "deck", new Color3(0.23, 0.27, 0.34));
   const deck = MeshBuilder.CreateBox("walkway", { width: 80, height: 0.6, depth: 10 }, scene);
+  deck.receiveShadows = true;
   deck.position = new Vector3(0, 5.7, -35);
   deck.material = deckMat;
   addBox(colliders, 0, 5.7, -35, 80, 0.6, 10); // thin solid: blocks camera rays, stands on
@@ -345,6 +348,9 @@ export function buildWorld(scene: Scene): WorldRefs {
 
   // Green Zone courtyard art test: in-place dressing, no topology change.
   dressCourtyard(scene, colliders);
+  // Green Zone milestone slice: service courtyard, walkway dress, alley nook,
+  // relay installation, background skyline (colliders validated in gz-layout).
+  buildGreenZone(scene, colliders);
 
   return {
     colliders, caches, relayPos, relayRadius, relayRing: ring,
@@ -352,3 +358,4 @@ export function buildWorld(scene: Scene): WorldRefs {
     bossGate: new Vector3(32, 0, 2), bounds: 66, walkwayTop: 6,
   };
 }
+

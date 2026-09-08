@@ -282,3 +282,63 @@ below, all dynamics OFF pending hold approval. The mesh remains the labeled
   `-grip-side.png`, `-grip-quarter.png`, `-gameplay.png`,
   `-markers.png`, `-markers-grip.png`. Harness:
   `node scripts/tololo-hold-check.mjs`. Status: READY FOR VISUAL REVIEW.
+
+## 14. Firing-origin investigation (2026-09-08, status: READY FOR REVIEW)
+
+Gameplay captures showed tracers disconnected from the barrel (long vertical
+beams ground→target). Static hold (§13) preserved as baseline; dynamics stay
+OFF. No commit/push/deploy per instructions.
+
+- Identified cause (code, not guessed): `tickTololoStaticHold` kept the
+  mount position in shared scratch `_e`, which `solveHoldArm` reuses
+  internally — the muzzle computation then read a clobbered unit direction
+  instead of the mount position, sending `muzzleOverride` to near ground
+  level. Every shot spawned at the ground while the visible barrel stayed
+  at the shoulder: exactly the reported picture.
+- Fix: dedicated `_mountPos` scratch plus `tololoWeaponPose` as the single
+  source of truth for the held weapon transform, shared by the visual tick
+  AND a synchronous fire-time computation. `Simulation.muzzlePos()` now
+  recomputes the barrel tip from the CURRENT (pos/yaw/pitch) each call, so
+  shots can never observe a previous frame's pose; the per-frame override
+  remains as fallback (rest unmeasured, transitions), then the legacy
+  formula. Initialization/detach paths fall back identically (override
+  cleared on run end and visual detach).
+- One-snapshot audit: `firePrimary` snapshots one `muzzle` Vector3 per shot
+  shared by hit detection and tracers; pooled tracer meshes receive COPIES
+  (`mid`/`len`), never live references. Babylon `add`/`subtract` return new
+  vectors (only `InPlace`/`ToRef` mutate), so multi-pellet loops cannot
+  corrupt the snapshot. Enemy shots are independent pooled objects.
+  Per-shot debug ring (`sim.shotLog`, id/step/frameMs/muzzle/aim/dir/
+  tracer endpoints) backs the harness; `sim.stepCount` correlates ticks.
+- Parallax note: barrel-parallel-to-look is not the aim — shots use
+  muzzle→camera-aim-point, already correct by construction for near and far
+  targets; the fix only moved the honest start point. Measured barrel-vs-
+  look angle 0.0° at level/up/down (shared pitch source by design).
+- Measured (`scripts/tololo-fire-check.mjs`, isolated rank-1 primary fire,
+  hostiles cleared, spawns held): stationary tracer-start==spawn==muzzle==
+  anchor (0.000); turning (6 shots) and moving bursts per-shot exact; aim
+  up/down exact (one 0.056 read-vs-log jitter, under the 0.08 gate);
+  firing consumes ammo normally. Matched firing-frame evidence:
+  `artifacts/tololo-fire-frame.png` shows the frozen beam leaving the
+  barrel tip (log: tracerA==muzzle to 0.000, endpoints at the struck
+  crate). Tracers are instant full-length beams (0.07s life), not
+  traveling projectiles — the harness freezes them (fast 5ms shot
+  detection) purely for capture determinism.
+- Cover (`bN-L` solid segment; x=0 is a door gap, verified in world.ts):
+  nose-to-wall tracer stops AT the face (0.59–0.61 long), muzzle-inside-
+  volume yields a zero-length tracer (slab raycast returns 0 from inside),
+  kills unchanged — no through-wall fire. Damage, rate, spread, range
+  rules untouched (only the ray start moved, to the visible tip).
+- Forensics side-note: the bright yellow box on the receiver in close-ups
+  is the placeholder STOCK's orange accent material under the strong
+  rig, confirmed by body-hidden/weapon-hidden isolation captures — not a
+  marker, tracer, or defect. Markers verified hidden in clean runs.
+- Hands (§13 req 7): unchanged by this fix — firing moves neither pose
+  nor contacts (dynamics off; hold-check contact errors still ~0 while
+  firing). Right glove on the mag grip, left palm under the receiver,
+  stock seated, head clear, per the §13 views plus the new firing frame.
+  Finer finger/sleeve work awaits the review verdict, not more blind
+  tuning.
+- Views: `artifacts/tololo-fire-frame.png` (beam on barrel tip),
+  `-plus1.png`, `-aimup.png`, `-cover.png` (wall-stop). Status: READY FOR
+  VISUAL REVIEW — statics alone were never claimed as firing proof.

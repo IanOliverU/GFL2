@@ -4,6 +4,7 @@ import { Matrix, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { DirectionalLight } from "@babylonjs/core/Lights/directionalLight";
 import { HemisphericLight } from "@babylonjs/core/Lights/hemisphericLight";
 import { Engine } from "@babylonjs/core/Engines/engine";
+import { ImageProcessingConfiguration } from "@babylonjs/core/Materials/imageProcessingConfiguration";
 import { FreeCamera } from "@babylonjs/core/Cameras/freeCamera";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
@@ -94,6 +95,10 @@ export class Game {
       }
     }
     this.scene = new Scene(this.engine);
+    // Filmic highlight compression for the daylight rig (cf. summer-game).
+    // Dev A/B hook (?notonemap=1): perf comparisons, never shipped on.
+    this.scene.imageProcessingConfiguration.toneMappingEnabled = this.dev.get("notonemap") !== "1";
+    this.scene.imageProcessingConfiguration.toneMappingType = ImageProcessingConfiguration.TONEMAPPING_ACES;
     this.scene.clearColor = new Color4(0.04, 0.05, 0.08, 1);
     this.camera = new FreeCamera("cam", new Vector3(0, 4, 18), this.scene);
     this.camera.minZ = 0.1;
@@ -103,11 +108,20 @@ export class Game {
     // Attaching Babylon's FreeCamera controls here registers a second, conflicting
     // controller and makes real pointer-lock movement appear inverted or doubled.
 
+    // Green Zone daylight rig: cool sky/ground fill + warm low sun.
+    // Shadow maps + sky dome are set up by buildGreenZone (fixed courtyard
+    // frustum); values here stay the single source of truth for the sun.
     const hemi = new HemisphericLight("hemi", new Vector3(0.3, 1, 0.2), this.scene);
-    hemi.intensity = 0.95;
+    hemi.diffuse = new Color3(0.78, 0.87, 1.0);
+    hemi.groundColor = new Color3(0.45, 0.42, 0.34);
+    hemi.intensity = 1.15;
     const dir = new DirectionalLight("dir", new Vector3(-0.5, -1, 0.35), this.scene);
-    dir.intensity = 1.1;
-    dir.position = new Vector3(20, 40, -10);
+    dir.diffuse = new Color3(1.0, 0.94, 0.82);
+    dir.intensity = 2.2;
+    dir.position = new Vector3(28, 42, -14);
+    dir.shadowFrustumSize = 90;
+    dir.shadowMinZ = 1;
+    dir.shadowMaxZ = 140;
 
     this.world = buildWorld(this.scene);
     this.sim = new Simulation(this.scene, this.world, {
