@@ -4,6 +4,7 @@ import { Color3 } from "@babylonjs/core/Maths/math.color";
 import { Vector3 } from "@babylonjs/core/Maths/math.vector";
 import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
+import { TransformNode } from "@babylonjs/core/Meshes/transformNode";
 import { Scene } from "@babylonjs/core/scene";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
 import {
@@ -122,7 +123,26 @@ export class Simulation {
   cachesOpened = 0;
   shakeAmt = 0;
 
-  playerMesh!: Mesh; playerBody!: Mesh; gunMesh!: Mesh;
+  playerMesh!: Mesh; playerBody!: Mesh; gunMesh!: Mesh; playerHead!: Mesh;
+  // Named weapon hardpoint: the PMX carries no firearm, so a clearly
+  // identified placeholder rifle rides here. Combat math stays authoritative
+  // in muzzlePos()/firePrimary(); the Muzzle node is visual-only.
+  weaponMount!: TransformNode; muzzleNode!: TransformNode;
+  // Explicit weapon-local anchors on the placeholder rifle (mount-local units,
+  // mount scaling 0.6 applies). MainGrip = trigger/mag grip, SupportGrip =
+  // fore-end, StockContact = shoulder-pocket face, Muzzle = barrel tip.
+  mainGripNode!: TransformNode; supportGripNode!: TransformNode; stockNode!: TransformNode;
+  // Dev-only hold-debug markers (captures with ?mark=1). Hidden by default.
+  gripMarkers: Mesh[] = [];
+  markerContactR!: Mesh; markerContactL!: Mesh;
+  // Honest shot origin: world-space barrel tip written each frame by the
+  // Tololo visual tick. Null => legacy formula (placeholder characters).
+  // Direction logic (muzzle -> camera aim point) is unchanged, so damage,
+  // cadence, range, and enemy behavior are preserved.
+  muzzleOverride: Vector3 | null = null;
+  // External character visual (Tololo PMX art slice). Null => placeholder.
+  externalRoot: TransformNode | null = null;
+  externalStatus: "placeholder" | "pmx" = "placeholder";
   private bodyScaleY = 1;
   aimPoint = new Vector3(0, 1, 0);
   muzzleOffset = new Vector3(0.35, 1.45, 0.8);
@@ -176,8 +196,10 @@ export class Simulation {
     this.empowerMagT = 0; this.empowerMul = 1; this.saturationT = 0; this.slideT = 0;
     this.dodgeT = 0; this.dodgeCD = 0; this.iframes = 0; this.aiming = false;
     this.bloom = 0; this.overdriveCount = 0; this.satTick = 0; this.shakeAmt = 0;
+    this.muzzleOverride = null;
     this.gunRecoil = 0;
     this.playerBody.rotation.z = 0;
+    if (this.externalRoot) this.externalRoot.rotation.z = 0;
     this.interrupted = false;
     this.spawnT = 2.5; this.spawnBudget = 0;
     this.camPos.set(4.9, 3.1, 17.5);
@@ -230,14 +252,117 @@ export class Simulation {
     this.playerBody = MeshBuilder.CreateCapsule("pbody", { height: 1.7, radius: 0.42 }, s);
     this.playerBody.parent = this.playerMesh;
     this.playerBody.position.y = 1.0;
-    const head = MeshBuilder.CreateSphere("phead", { diameter: 0.55 }, s);
-    head.position.y = 2.1; head.parent = this.playerMesh;
-    head.material = stdMat(s, "pskin", new Color3(0.95, 0.82, 0.72));
-    this.gunMesh = MeshBuilder.CreateBox("pgun", { width: 0.16, height: 0.24, depth: 1.3 }, s);
-    this.gunMesh.parent = this.playerMesh;
-    this.gunMesh.position = new Vector3(0.4, 1.4, 0.7);
-    this.gunMesh.material = stdMat(s, "pgunM", new Color3(0.12, 0.12, 0.15));
+    this.playerHead = MeshBuilder.CreateSphere("phead", { diameter: 0.55 }, s);
+    this.playerHead.position.y = 2.1; this.playerHead.parent = this.playerMesh;
+    this.playerHead.material = stdMat(s, "pskin", new Color3(0.95, 0.82, 0.72));
+    this.buildPlaceholderRifle();
     this.recolorPlayer();
+  }
+
+  private buildPlaceholderRifle(): void {
+    // Clearly identified stand-in firearm (the Tololo PMX ships no weapon).
+    // Layout is visual only; Simulation.muzzlePos() remains the shot authority.
+    const s = this.scene;
+    this.weaponMount = new TransformNode("WeaponMount", s);
+    this.weaponMount.parent = this.playerMesh;
+    this.weaponMount.position = new Vector3(0.4, 1.35, 0.1);
+    // Placeholder scale: a rifle reads ~55% of body height (bind-pose stand-in).
+    this.weaponMount.scaling.setAll(0.6);
+    const gunMat = stdMat(s, "PLACEHOLDER_RIFLE_MAT", new Color3(0.12, 0.12, 0.15));
+    const accent = stdMat(s, "PLACEHOLDER_RIFLE_ACCENT", new Color3(0.9, 0.6, 0.2), new Color3(0.3, 0.18, 0.05));
+    this.gunMesh = MeshBuilder.CreateBox("PLACEHOLDER_RIFLE_RECEIVER", { width: 0.16, height: 0.24, depth: 1.1 }, s);
+    this.gunMesh.material = gunMat;
+    this.gunMesh.parent = this.weaponMount;
+    this.gunMesh.position = new Vector3(0, 0.05, 0.35);
+    const barrel = MeshBuilder.CreateCylinder("PLACEHOLDER_RIFLE_BARREL", { height: 0.55, diameter: 0.09 }, s);
+    barrel.material = gunMat;
+    barrel.parent = this.weaponMount;
+    barrel.rotation.x = Math.PI / 2;
+    barrel.position = new Vector3(0, 0.08, 1.15);
+    const mag = MeshBuilder.CreateBox("PLACEHOLDER_RIFLE_MAG", { width: 0.12, height: 0.34, depth: 0.2 }, s);
+    mag.material = gunMat;
+    mag.parent = this.weaponMount;
+    mag.position = new Vector3(0, -0.18, 0.35);
+    mag.rotation.x = 0.25;
+    const stock = MeshBuilder.CreateBox("PLACEHOLDER_RIFLE_STOCK", { width: 0.14, height: 0.22, depth: 0.45 }, s);
+    stock.material = accent;
+    stock.parent = this.weaponMount;
+    stock.position = new Vector3(0, 0.02, -0.35);
+    this.muzzleNode = new TransformNode("Muzzle", s);
+    this.muzzleNode.parent = this.weaponMount;
+    this.muzzleNode.position = new Vector3(0, 0.08, 1.45);
+    // Explicit anchors at the placeholder's actual features (mount-local):
+    // mag grip (box at y -0.18 z 0.35), fore-end (receiver front z ~0.8),
+    // stock rear face (box rear z -0.575). Names are role labels, not claims
+    // about any real-steel model — the rifle stays a labeled placeholder.
+    this.mainGripNode = new TransformNode("MainGrip", s);
+    this.mainGripNode.parent = this.weaponMount;
+    this.mainGripNode.position = new Vector3(0, -0.14, 0.35);
+    this.supportGripNode = new TransformNode("SupportGrip", s);
+    this.supportGripNode.parent = this.weaponMount;
+    // Receiver over the mag: the barrel mid-point is beyond her arm reach,
+    // with margin kept for upward aim (see tololo-visual.ts SUP_LOCAL).
+    // Placeholder limitation.
+    this.supportGripNode.position = new Vector3(0, 0.02, 0.42);
+    this.stockNode = new TransformNode("StockContact", s);
+    this.stockNode.parent = this.weaponMount;
+    this.stockNode.position = new Vector3(0, 0.06, -0.58);
+    this.buildGripMarkers();
+  }
+
+  private gripMarker(name: string, color: Color3, parent: TransformNode | Mesh, pos: Vector3): Mesh {
+    const m = MeshBuilder.CreateSphere(name, { diameter: 0.09 }, this.scene);
+    m.material = stdMat(this.scene, `${name}M`, new Color3(0.05, 0.05, 0.05), color);
+    m.parent = parent;
+    m.position.copyFrom(pos);
+    m.isVisible = false;
+    (m as Mesh).isPickable = false;
+    this.gripMarkers.push(m);
+    return m;
+  }
+
+  private buildGripMarkers(): void {
+    // Anchor markers ride the mount (always co-located with their anchors).
+    this.gripMarker("MARK_MainGrip", new Color3(0.2, 1, 0.3), this.weaponMount, this.mainGripNode.position);
+    this.gripMarker("MARK_SupportGrip", new Color3(0.3, 0.5, 1), this.weaponMount, this.supportGripNode.position);
+    this.gripMarker("MARK_Stock", new Color3(1, 0.55, 0.1), this.weaponMount, this.stockNode.position);
+    this.gripMarker("MARK_Muzzle", new Color3(1, 0.15, 0.15), this.weaponMount, this.muzzleNode.position);
+    // Hand contact markers are repositioned every visual tick (player space).
+    this.markerContactR = this.gripMarker("MARK_ContactR", new Color3(1, 1, 0.3), this.playerMesh, new Vector3());
+    this.markerContactL = this.gripMarker("MARK_ContactL", new Color3(1, 1, 1), this.playerMesh, new Vector3());
+  }
+
+  setGripMarkersVisible(v: boolean): void {
+    for (const m of this.gripMarkers) m.isVisible = v;
+  }
+
+  /**
+   * Attach (or detach with null) the external Tololo visual. Placeholder rifle stays.
+   * Returns the detached previous root, if any — the caller owns it (park for
+   * reuse; never dispose a root whose async PMX textures may be in flight).
+   */
+  setExternalVisual(root: TransformNode | null, status: "placeholder" | "pmx" = "placeholder"): TransformNode | null {
+    const detached = this.externalRoot;
+    if (detached) {
+      detached.parent = null;
+      this.externalRoot = null;
+    }
+    this.externalRoot = root;
+    this.externalStatus = root ? status : "placeholder";
+    if (!root) this.muzzleOverride = null;
+    if (root) {
+      root.parent = this.playerMesh;
+      root.position.y += 0; // fitting (scale + grounding) is done by the loader
+    }
+    const usingExternal = !!root;
+    this.playerBody.isVisible = !usingExternal;
+    this.playerHead.isVisible = !usingExternal;
+    this.playerBody.rotation.z = 0;
+    if (root) {
+      root.rotation.z = 0;
+      root.setEnabled(true);
+    }
+    return detached;
   }
 
   private recolorPlayer(): void {
@@ -435,7 +560,7 @@ export class Simulation {
     const spd = Math.hypot(this.vel.x, this.vel.z);
     this.playerBody.position.y = 1.0 + Math.sin(this.runTime * 11) * 0.05 * Math.min(1, spd / 6);
     this.playerBody.scaling.y = this.bodyScaleY * (this.dodgeT > 0 ? 0.8 : 1);
-    this.gunMesh.position.z = 0.7 - this.gunRecoil * 0.35;
+    this.gunMesh.position.z = 0.35 - this.gunRecoil * 0.35;
   }
 
   private grounded(): boolean {
@@ -448,7 +573,13 @@ export class Simulation {
     synth.reload();
   }
 
-  private muzzlePos(): Vector3 {
+  muzzlePos(): Vector3 {
+    // Honest origin: the visible barrel tip when the Tololo hold is driving
+    // it (written per-frame by the visual tick); otherwise the legacy
+    // hip-height formula. Only the ray START moves — direction is recomputed
+    // muzzle -> aim point at every call site, so damage, cadence, spread,
+    // range, and wall/enemy tests behave identically.
+    if (this.muzzleOverride) return this.muzzleOverride.clone();
     const f = new Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
     const r = new Vector3(-f.z, 0, f.x);
     return new Vector3(
@@ -1622,6 +1753,8 @@ export class Simulation {
       this.hp = 0;
       this.alive = false;
       this.playerBody.rotation.z = 1.2;
+      // Mirror the death pose onto the external visual (procedural only).
+      if (this.externalRoot) this.externalRoot.rotation.z = 1.2;
       this.interrupted = true;
       this.events.playerDied();
     }

@@ -6,6 +6,7 @@ import { Mesh } from "@babylonjs/core/Meshes/mesh";
 import { MeshBuilder } from "@babylonjs/core/Meshes/meshBuilder";
 import { Scene } from "@babylonjs/core/scene";
 import { StandardMaterial } from "@babylonjs/core/Materials/standardMaterial";
+import { dressCourtyard } from "./courtyard";
 
 export interface AABB { min: Vector3; max: Vector3; }
 
@@ -341,6 +342,9 @@ export function buildWorld(scene: Scene): WorldRefs {
     new Vector3(60, 0, -14), new Vector3(46, 0, 18), new Vector3(-12, 0, -34),
     new Vector3(14, 0, 34),
   ].map((p) => new Vector3(p.x, groundHeightAt(p.x, p.z), p.z));
+
+  // Green Zone courtyard art test: in-place dressing, no topology change.
+  dressCourtyard(scene, colliders);
 
   return {
     colliders, caches, relayPos, relayRadius, relayRing: ring,

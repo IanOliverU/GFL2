@@ -3,3 +3,13 @@ dist/
 .vite/
 coverage/
 *.log
+# Tololo art-slice: original PMX/textures are redistribution-restricted
+# (see docs/tololo-art-slice.md) and must never be committed.
+assets/
+# Local-only staged runtime copies + unapproved derived outputs.
+public/mmd/
+public/assets/glb/
+*.pmx
+*.pmd
+*.vmd
+*.vpd

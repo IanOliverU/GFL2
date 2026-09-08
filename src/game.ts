@@ -16,6 +16,7 @@ import { GameUI, HudState } from "./ui";
 import { eligibleChoices, rollChoices, applyChoice, UpgradeChoice } from "./progression";
 import { synth, loadSettings, saveSettings, Settings } from "./audio";
 import { tryLoadCharacterAsset } from "./assets";
+import { getTololoRest, measureTololoHold, mountRifleToHand, parkTololoSpare, restoreRifleHip, takeSpareTololo, tickTololoVisual, tryLoadTololoPmx } from "./tololo-visual";
 import { isAttachmentCompatible, nextLoopTransition } from "./rules";
 
 type State = "title" | "select" | "playing" | "paused" | "levelup" | "equip" | "compare" | "victory" | "defeat";
@@ -36,6 +37,11 @@ export class Game {
   renderer = "unknown";
   acc = 0; last = 0;
   fps = 60;
+  // Tololo art-slice state (unapproved, local review only).
+  private visualChar: string | null = null;
+  private visualToken = 0;
+  // Dev-only camera override for art review (?dev=1 console use). Null = gameplay camera.
+  debugCamera: { pos: Vector3; target: Vector3 } | null = null;
   dev = new URLSearchParams(location.search);
   devMode = false;
   private levelChoices: UpgradeChoice[] = [];
@@ -120,6 +126,18 @@ export class Game {
       victory: () => this.onVictory(),
       healFlash: () => this.ui.flashHeal(),
     }, this.input);
+    // Hold-debug markers (grip anchors, contacts, stock, muzzle) for captures
+    // with ?mark=1. Hidden by default so review captures stay clean.
+    if (this.dev.get("mark") === "1") this.sim.setGripMarkersVisible(true);
+    if (this.devMode) {
+      // Text-only hold inspection for the check harness (no screenshots).
+      (window as unknown as { __tololoHold: unknown }).__tololoHold = {
+        measure: () => this.sim.externalRoot && this.sim.externalStatus === "pmx"
+          ? measureTololoHold(this.sim.externalRoot, this.sim, this.sim.pos, this.sim.yaw, this.sim.pitch)
+          : null,
+        rest: () => (this.sim.externalRoot ? getTololoRest(this.sim.externalRoot) : null),
+      };
+    }
     this.applyControlSettings();
 
     this.input.attach(canvas, () => {
@@ -213,6 +231,37 @@ export class Game {
     void tryLoadCharacterAsset(this.scene, charId).then((r) => {
       if (r === "placeholder") console.info("[assets] using stylized placeholder for", charId);
     });
+    // Tololo art slice: swap the placeholder body for the staged PMX visual.
+    // Failure keeps the placeholder; combat math and controls are untouched.
+    if (this.visualChar !== charId) {
+      this.visualToken++;
+      this.visualChar = charId;
+      const detached = this.sim.setExternalVisual(null);
+      if (detached) parkTololoSpare(detached);
+      restoreRifleHip(this.sim);
+      this.debugCamera = null;
+    }
+    if (charId === "tololo" && this.sim.externalStatus !== "pmx") {
+      const spare = takeSpareTololo();
+      if (spare) {
+        this.sim.setExternalVisual(spare, "pmx");
+        mountRifleToHand(this.sim);
+      } else {
+        const token = ++this.visualToken;
+        void tryLoadTololoPmx(this.scene).then((res) => {
+          if (res.status !== "pmx") return;
+          if (token !== this.visualToken || this.visualChar !== "tololo") {
+            // Stale winner of a rapid restart chain: park, never dispose
+            // mid-load (see tololo-visual.ts).
+            parkTololoSpare(res.root);
+            return;
+          }
+          this.sim.setExternalVisual(res.root, "pmx");
+          mountRifleToHand(this.sim);
+          console.info(`[tololo] PMX visual attached in ${res.loadMs.toFixed(0)}ms`);
+        });
+      }
+    }
     this.requestGameplayLock();
     this.last = performance.now();
   }
@@ -493,6 +542,22 @@ export class Game {
       if (this.state === "playing" && this.sim.build.queuedLevels > 0) this.openLevelUp();
     }
 
+    // Tololo procedural visual: pose + skin upload + rifle seating.
+    // Render-dt driven (not fixed-step); frozen while paused; combat untouched.
+    if (playing && this.sim.externalStatus === "pmx" && this.sim.externalRoot) {
+      const spd = Math.hypot(this.sim.vel.x, this.sim.vel.z);
+      tickTololoVisual(this.sim.externalRoot, this.sim, rdt, {
+        speed: spd,
+        aiming: this.sim.aiming,
+        pitch: this.sim.pitch,
+        recoil: this.sim.gunRecoil,
+        reloading: this.sim.reloading > 0,
+        dodgeT: this.sim.dodgeT,
+        alive: this.sim.alive,
+        time: this.sim.runTime,
+      });
+    }
+
     // markers for world attachment drops
     this.syncDropMarkers();
 
@@ -536,6 +601,11 @@ export class Game {
 
   private syncCamera(rdt: number): void {
     void rdt;
+    if (this.debugCamera) {
+      this.camera.position.copyFrom(this.debugCamera.pos);
+      this.camera.setTarget(this.debugCamera.target);
+      return;
+    }
     this.camera.position.copyFrom(this.sim.camPos);
     this.camera.setTarget(this.sim.camTarget);
     const aiming = this.sim.input.rmbDown;
