@@ -10,7 +10,7 @@ import { chromium } from "playwright-core";
 
 const base = process.env.GAME_URL ?? "http://127.0.0.1:5173";
 const executablePath = process.env.CHROME_PATH ?? "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
-const staged = path.resolve("public/mmd/tololo/tololo.pmx");
+const staged = path.resolve(".local-assets/mmd/tololo/tololo.pmx");
 const backup = `${staged}.bak`;
 
 const errors = [];

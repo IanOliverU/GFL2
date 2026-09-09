@@ -47,12 +47,18 @@ export interface TololoRig {
   /** IK reach flags from the last static tick (measurement only). */
   lastIkR: boolean;
   lastIkL: boolean;
+  locomotion: TololoLocomotionState;
 }
 
 /** Per-frame gameplay state driving the procedural pose. All fields unitless/SI as noted. */
 export interface TololoPoseState {
   /** Horizontal speed (units/s) for locomotion blending. */
   speed: number;
+  /** Collision-resolved horizontal velocity in world space. */
+  velocityX: number;
+  velocityZ: number;
+  yaw: number;
+  grounded: boolean;
   aiming: boolean;
   /** Look pitch in radians (positive up). */
   pitch: number;
@@ -130,6 +136,8 @@ export interface TololoHoldSim extends RifleMount {
 
 /** Static-hold gate. True = one stationary hold, all dynamic offsets off. */
 export const tololoHoldMode: { static: boolean } = { static: true };
+/** Same-build verification switch; production keeps lower-body locomotion on. */
+export const tololoLocomotionMode: { enabled: boolean } = { enabled: true };
 
 /**
  * Static hold tuning (player units / radians unless noted). All provisional
@@ -162,6 +170,154 @@ export const tololoHoldParams = {
   headPitch: 0,
   headRoll: 0,
 };
+
+/** Procedural lower-body tuning. Upper-body and weapon ownership stay separate. */
+export const tololoLocomotionParams = {
+  response: 11,
+  stopResponse: 14,
+  strideRadiansPerUnit: 1.28,
+  moveThreshold: 0.12,
+  fullWeightSpeed: 1.8,
+  runStart: 5.5,
+  runFull: 9.5,
+  walkThigh: 0.3,
+  runThigh: 0.5,
+  reverseScale: 0.72,
+  strafeThigh: 0.1,
+  walkStrafe: 0.2,
+  runStrafe: 0.3,
+  walkKnee: 0.3,
+  runKnee: 0.5,
+  ankleCounter: 0.42,
+  idleSway: 0.012,
+};
+
+export interface TololoLocomotionState {
+  phase: number;
+  forward: number;
+  right: number;
+  weight: number;
+}
+
+export interface TololoLegPose {
+  lowerPitch: number;
+  lowerRoll: number;
+  thighPitchL: number;
+  thighPitchR: number;
+  thighRollL: number;
+  thighRollR: number;
+  kneeL: number;
+  kneeR: number;
+  ankleL: number;
+  ankleR: number;
+  toeL: number;
+  toeR: number;
+  speed: number;
+  run: number;
+}
+
+export function newTololoLocomotionState(): TololoLocomotionState {
+  return { phase: 0, forward: 0, right: 0, weight: 0 };
+}
+
+/** Project a world-space velocity onto Tololo's facing-relative axes. */
+export function tololoLocalVelocity(
+  velocityX: number, velocityZ: number, yaw: number,
+): { forward: number; right: number } {
+  const sin = Math.sin(yaw);
+  const cos = Math.cos(yaw);
+  const forward = velocityX * -sin + velocityZ * -cos;
+  const right = velocityX * cos + velocityZ * -sin;
+  return {
+    forward: forward || 0,
+    right: right || 0,
+  };
+}
+
+function saturate(v: number): number {
+  return Math.min(1, Math.max(0, v));
+}
+
+function smoothstep(a: number, b: number, v: number): number {
+  const t = saturate((v - a) / (b - a));
+  return t * t * (3 - 2 * t);
+}
+
+/** Advance direction blends and distance-driven stride phase without root motion. */
+export function stepTololoLocomotion(
+  state: TololoLocomotionState,
+  velocityX: number,
+  velocityZ: number,
+  yaw: number,
+  grounded: boolean,
+  dodging: boolean,
+  dt: number,
+): TololoLocomotionState {
+  const p = tololoLocomotionParams;
+  const local = tololoLocalVelocity(velocityX, velocityZ, yaw);
+  const enabled = grounded && !dodging;
+  const targetForward = enabled ? local.forward : 0;
+  const targetRight = enabled ? local.right : 0;
+  const targetSpeed = Math.hypot(targetForward, targetRight);
+  const currentSpeed = Math.hypot(state.forward, state.right);
+  const safeDt = Math.min(0.05, Math.max(0, dt));
+  const response = targetSpeed > currentSpeed ? p.response : p.stopResponse;
+  const blend = 1 - Math.exp(-response * safeDt);
+  state.forward += (targetForward - state.forward) * blend;
+  state.right += (targetRight - state.right) * blend;
+  const targetWeight = enabled
+    ? saturate((targetSpeed - p.moveThreshold) / (p.fullWeightSpeed - p.moveThreshold))
+    : 0;
+  state.weight += (targetWeight - state.weight) * blend;
+  if (enabled && targetSpeed > p.moveThreshold) {
+    state.phase = (state.phase + targetSpeed * safeDt * p.strideRadiansPerUnit) % (Math.PI * 2);
+  }
+  return state;
+}
+
+/** Pure lower-body pose sampled from the blended locomotion state. */
+export function tololoLegPose(
+  state: TololoLocomotionState, time: number,
+): TololoLegPose {
+  const p = tololoLocomotionParams;
+  const speed = Math.hypot(state.forward, state.right);
+  const run = smoothstep(p.runStart, p.runFull, speed);
+  const dirForward = speed > 1e-4 ? state.forward / speed : 0;
+  const dirRight = speed > 1e-4 ? state.right / speed : 0;
+  const reverse = dirForward < 0 ? p.reverseScale : 1;
+  const stride = Math.sin(state.phase);
+  const liftL = Math.max(0, stride);
+  const liftR = Math.max(0, -stride);
+  const thighAmp = (p.walkThigh + (p.runThigh - p.walkThigh) * run) * state.weight;
+  const strafeAmp = (p.walkStrafe + (p.runStrafe - p.walkStrafe) * run) * state.weight;
+  const kneeAmp = (p.walkKnee + (p.runKnee - p.walkKnee) * run) * state.weight;
+  const forwardSwing = stride * dirForward * thighAmp * reverse;
+  const crossSwing = stride * Math.abs(dirRight) * p.strafeThigh * state.weight;
+  const lateralSwing = stride * dirRight * strafeAmp;
+  const baseThigh = 0.04;
+  const baseKnee = tololoHoldParams.kneeBend;
+  const thighPitchL = baseThigh + forwardSwing + crossSwing;
+  const thighPitchR = baseThigh - forwardSwing - crossSwing;
+  const kneeL = baseKnee - liftL * kneeAmp;
+  const kneeR = baseKnee - liftR * kneeAmp;
+  return {
+    lowerPitch: -0.025 * dirForward * state.weight,
+    lowerRoll: Math.sin(time * 1.8) * p.idleSway * (1 - state.weight)
+      - Math.cos(state.phase * 2) * 0.025 * state.weight,
+    thighPitchL,
+    thighPitchR,
+    thighRollL: tololoHoldParams.hipSplay + lateralSwing,
+    thighRollR: -tololoHoldParams.hipSplay + lateralSwing,
+    kneeL,
+    kneeR,
+    ankleL: -thighPitchL * p.ankleCounter - kneeL * 0.18,
+    ankleR: -thighPitchR * p.ankleCounter - kneeR * 0.18,
+    toeL: -liftL * 0.08 * state.weight,
+    toeR: -liftR * 0.08 * state.weight,
+    speed,
+    run,
+  };
+}
 
 /** Bind-pose arm measurements (model space, PMX units). Null until measured. */
 export interface TololoRestPose {
@@ -352,6 +508,16 @@ export function getTololoRig(root: TransformNode): TololoRig | null {
   return rigByRoot.get(root) ?? null;
 }
 
+/** Clear presentation state when a run starts or a pooled model is reused. */
+export function resetTololoLocomotion(root: TransformNode): void {
+  const state = rigByRoot.get(root)?.locomotion;
+  if (!state) return;
+  state.phase = 0;
+  state.forward = 0;
+  state.right = 0;
+  state.weight = 0;
+}
+
 export function tryLoadTololoPmx(scene: Scene, url = TOLOLO_PMX_URL): Promise<TololoVisual> {
   if (inflight) return inflight;
   inflight = loadTololoPmx(scene, url).finally(() => {
@@ -460,7 +626,10 @@ async function loadTololoPmx(scene: Scene, url: string): Promise<TololoVisual> {
       model.ikSolverStates.fill(0);
       const bones = new Map<string, IMmdRuntimeBone>();
       for (const b of model.runtimeBones) bones.set(b.name, b);
-      rig = { runtime, model, bones, scale, lift, rawHeight: height, rest: null, lastIkR: false, lastIkL: false };
+      rig = {
+        runtime, model, bones, scale, lift, rawHeight: height, rest: null,
+        lastIkR: false, lastIkL: false, locomotion: newTololoLocomotionState(),
+      };
       // Bind-pose arm measurements for the static-hold IK (identity pose is
       // current: nothing has been posed yet on this fresh model).
       rig.rest = measureTololoRest(rig);
@@ -472,7 +641,10 @@ async function loadTololoPmx(scene: Scene, url: string): Promise<TololoVisual> {
     } catch (rigErr) {
       console.warn("[tololo] animation runtime unavailable, bind pose only:", rigErr);
       // Bind-pose fallback still needs a rig-shaped entry for tick() to skip.
-      const fallback = { runtime: null, model: null, bones: new Map(), scale, lift, rawHeight: height, rest: null, lastIkR: false, lastIkL: false };
+      const fallback = {
+        runtime: null, model: null, bones: new Map(), scale, lift, rawHeight: height,
+        rest: null, lastIkR: false, lastIkL: false, locomotion: newTololoLocomotionState(),
+      };
       rig = fallback as unknown as TololoRig;
     }
     return { status: "pmx", root, approxHeight: TOLOLO_TARGET_HEIGHT, loadMs: performance.now() - started, rig };
@@ -593,10 +765,15 @@ export function alignRifleToHands(rig: TololoRig, mount: RifleMount, s: TololoPo
 export function tickTololoVisual(
   root: TransformNode, mount: RifleMount, dt: number, s: TololoPoseState,
 ): void {
-  void dt;
   if (!s.alive) return;
   const rig = rigByRoot.get(root);
   if (!rig || !rig.model) return;
+  if (tololoLocomotionMode.enabled) {
+    stepTololoLocomotion(
+      rig.locomotion, s.velocityX, s.velocityZ, s.yaw,
+      s.grounded, s.dodgeT > 0, dt,
+    );
+  }
   if (tololoHoldMode.static) {
     tickTololoStaticHold(root, mount as TololoHoldSim, s);
     return;
@@ -842,16 +1019,35 @@ export function tickTololoStaticHold(
   const rest = rig.rest;
   const ms = sim.weaponMount.scaling.x || MOUNT_SCALE;
 
-  // Static stance + head (no dynamic offsets while the hold is unapproved).
+  // The accepted upper-body hold stays static. Locomotion owns lower-body
+  // bones only, so the shoulder-derived weapon anchors remain unchanged.
   setBoneRotation(rig, "上半身", 0, 0, 0);
   setBoneRotation(rig, "上半身2", 0, 0, 0);
   setBoneRotation(rig, "首", 0, p.headPitch * 0.5, 0);
   setBoneRotation(rig, "頭", 0, p.headPitch * 0.5, p.headRoll);
   setBoneRotation(rig, "センター", 0, 0, 0);
-  setBoneRotation(rig, "左足", 0, -p.hipSplay * 0.4, p.hipSplay);
-  setBoneRotation(rig, "右足", 0, -p.hipSplay * 0.4, -p.hipSplay);
-  setBoneRotation(rig, "左ひざ", 0, p.kneeBend, 0);
-  setBoneRotation(rig, "右ひざ", 0, p.kneeBend, 0);
+  if (tololoLocomotionMode.enabled) {
+    const legs = tololoLegPose(rig.locomotion, s.time);
+    setBoneRotation(rig, "下半身", 0, legs.lowerPitch, legs.lowerRoll);
+    setBoneRotation(rig, "左足", 0, legs.thighPitchL, legs.thighRollL);
+    setBoneRotation(rig, "右足", 0, legs.thighPitchR, legs.thighRollR);
+    setBoneRotation(rig, "左ひざ", 0, legs.kneeL, 0);
+    setBoneRotation(rig, "右ひざ", 0, legs.kneeR, 0);
+    setBoneRotation(rig, "左足首", 0, legs.ankleL, 0);
+    setBoneRotation(rig, "右足首", 0, legs.ankleR, 0);
+    setBoneRotation(rig, "左つま先", 0, legs.toeL, 0);
+    setBoneRotation(rig, "右つま先", 0, legs.toeR, 0);
+  } else {
+    setBoneRotation(rig, "下半身", 0, 0, 0);
+    setBoneRotation(rig, "左足", 0, -p.hipSplay * 0.4, p.hipSplay);
+    setBoneRotation(rig, "右足", 0, -p.hipSplay * 0.4, -p.hipSplay);
+    setBoneRotation(rig, "左ひざ", 0, p.kneeBend, 0);
+    setBoneRotation(rig, "右ひざ", 0, p.kneeBend, 0);
+    setBoneRotation(rig, "左足首", 0, 0, 0);
+    setBoneRotation(rig, "右足首", 0, 0, 0);
+    setBoneRotation(rig, "左つま先", 0, 0, 0);
+    setBoneRotation(rig, "右つま先", 0, 0, 0);
+  }
 
   // Weapon pose from the single shared source (pocket + pitch); the mount
   // lives in dedicated scratch across the IK solves below.

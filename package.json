@@ -5,12 +5,17 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "build": "tsc --noEmit && vite build && node scripts/check-prod-assets.mjs",
+    "check:prod-assets": "node scripts/check-prod-assets.mjs",
     "preview": "vite preview --port 4173 --strictPort",
     "test": "vitest run",
     "test:browser": "node scripts/browser-smoke.mjs",
     "test:chaser-review": "node scripts/chaser-review.mjs",
+    "test:tram-review": "node scripts/tram-circuit-check.mjs",
+    "test:tram-circuit": "node scripts/tram-circuit-check.mjs",
+    "test:tololo-locomotion": "node scripts/tololo-locomotion-check.mjs",
     "perf:chaser": "node scripts/chaser-perf.mjs",
+    "perf:tololo": "node scripts/tololo-perf.mjs",
     "test:watch": "vitest"
   },
   "dependencies": {

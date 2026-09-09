@@ -1,0 +1,251 @@
+{
+  "status": "tram connected circuit evidence (NOT suitability accepted)",
+  "conditions": "headless Chrome 1280x720, forced WebGL2, SwiftShader",
+  "gpuMode": "software",
+  "launchUrl": "/?dev=1&scene=tram-review&autostart=1&char=tololo&god=1&nolock=1&renderer=webgl",
+  "captures": [
+    "tram-circuit-overview.png",
+    "tram-circuit-scale.png",
+    "tram-circuit-platform.png",
+    "tram-circuit-ramp.png",
+    "tram-circuit-relay.png",
+    "tram-circuit-fight.png",
+    "tram-circuit-victory.png",
+    "tram-circuit-circuit.png",
+    "tram-circuit-walkthrough.webm"
+  ],
+  "checks": {
+    "groundHeights": {
+      "platform": 1.45,
+      "rampMid": 0.725,
+      "apron": 0
+    },
+    "climbRampA": {
+      "x": 5,
+      "y": 1.45,
+      "z": 29.25,
+      "yaw": 0
+    },
+    "deckTraverse": {
+      "x": 6.6,
+      "y": 1.45,
+      "z": 26.21,
+      "yaw": 0
+    },
+    "sheerFace": {
+      "x": 2.55,
+      "y": 0,
+      "z": 30,
+      "yaw": -1.57
+    },
+    "descendRampB": {
+      "x": 8,
+      "y": 0,
+      "z": 43.35,
+      "yaw": 3.14
+    },
+    "kioskPassage": {
+      "x": 5,
+      "y": 1.45,
+      "z": 36.41,
+      "yaw": 0
+    },
+    "holdOnDeck": {
+      "mainErr": 5.863110024591768e-9,
+      "supportErr": 4.7407222662891274e-8,
+      "stockErr": 0,
+      "barrelDeg": 0
+    },
+    "relay": {
+      "active": true,
+      "boss": true,
+      "bossPos": {
+        "x": 23.7,
+        "z": 58
+      }
+    },
+    "cache": {
+      "taken": [
+        false,
+        true,
+        false
+      ],
+      "opened": 1
+    },
+    "jumpHold": {
+      "x": 14,
+      "y": 0,
+      "z": 63.25,
+      "yaw": 3.14
+    },
+    "dodgeHold": {
+      "x": 14,
+      "y": 0,
+      "z": 63.25,
+      "yaw": 3.14
+    },
+    "phaseHold": {
+      "x": 14,
+      "y": 0,
+      "z": 63.25,
+      "yaw": 3.14,
+      "cdWas": 0
+    },
+    "northHold": {
+      "x": 6.6,
+      "y": 1.45,
+      "z": 18.75,
+      "yaw": 0
+    },
+    "victory": {
+      "state": "victory",
+      "charge": 1,
+      "bossDead": true
+    },
+    "loop": {
+      "state": "playing",
+      "loop": 1,
+      "x": 14,
+      "z": 61,
+      "relayReset": true
+    }
+  },
+  "loadWaitMs": 16008,
+  "webglRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
+  "tramPhase": "ready",
+  "tramError": null,
+  "relayPos": {
+    "_isDirty": true,
+    "_x": 16,
+    "_y": 0,
+    "_z": 55
+  },
+  "relayRadius": 5,
+  "caches": [
+    {
+      "_isDirty": true,
+      "_x": 5.5,
+      "_y": 0,
+      "_z": 57
+    },
+    {
+      "_isDirty": true,
+      "_x": 5,
+      "_y": 1.45,
+      "_z": 30
+    },
+    {
+      "_isDirty": true,
+      "_x": 14,
+      "_y": 0,
+      "_z": 62.5
+    }
+  ],
+  "spawnPoints": [
+    {
+      "_isDirty": true,
+      "_x": 14,
+      "_y": 0,
+      "_z": 61
+    },
+    {
+      "_isDirty": true,
+      "_x": 5,
+      "_y": 0,
+      "_z": 50
+    },
+    {
+      "_isDirty": true,
+      "_x": 20,
+      "_y": 0,
+      "_z": 60
+    },
+    {
+      "_isDirty": true,
+      "_x": 5,
+      "_y": 1.45,
+      "_z": 30
+    },
+    {
+      "_isDirty": true,
+      "_x": 8,
+      "_y": 1.45,
+      "_z": 24
+    },
+    {
+      "_isDirty": true,
+      "_x": 18,
+      "_y": 0,
+      "_z": 48
+    }
+  ],
+  "bossSpawn": {
+    "_isDirty": true,
+    "_x": 24,
+    "_y": 0,
+    "_z": 58
+  },
+  "groundAt": {
+    "platform": 1.45,
+    "rampMid": 0.725,
+    "apron": 0
+  },
+  "renderer": "WebGL2",
+  "sceneMeshes": 1134,
+  "greenZoneAbsent": true,
+  "combat": {
+    "enemies": 8,
+    "articulated": 5
+  },
+  "restart": {
+    "meshesBefore": 1121,
+    "meshesAfter": 1121,
+    "cachesReset": true,
+    "relayReset": true,
+    "tramStillLoaded": "ready",
+    "x": 14,
+    "z": 61
+  },
+  "perf": {
+    "idle": {
+      "label": "tram circuit idle apron",
+      "fps": 3.2415961619501505,
+      "frameMsAvg": 335.3555555555536,
+      "frameMsP95": 357.5,
+      "activeMeshes": 344,
+      "activeIndices": 633396,
+      "totalMeshes": 1121,
+      "drawCallsPerFrame": 341.1
+    },
+    "traversal": {
+      "label": "tram circuit traversal",
+      "fps": 3.000210014701024,
+      "frameMsAvg": 336.0222222222235,
+      "frameMsP95": 345.3999999999942,
+      "activeMeshes": 339,
+      "activeIndices": 618528,
+      "totalMeshes": 1121,
+      "drawCallsPerFrame": 337.5
+    },
+    "combat": {
+      "label": "tram circuit 8-enemy fight",
+      "fps": 2.6328780648333363,
+      "frameMsAvg": 415.58571428571514,
+      "frameMsP95": 430.4000000000233,
+      "activeMeshes": 414,
+      "activeIndices": 806706,
+      "totalMeshes": 1195,
+      "drawCallsPerFrame": 402.125
+    }
+  },
+  "gzBaseline": {
+    "label": "green zone idle spawn",
+    "fps": 8.715300193671242,
+    "frameMsAvg": 114.68461538461537,
+    "frameMsP95": 230.30000000000018,
+    "activeMeshes": 103,
+    "activeIndices": 238146,
+    "totalMeshes": 380,
+    "drawCallsPerFrame": 112.62962962962963
+  }
+}

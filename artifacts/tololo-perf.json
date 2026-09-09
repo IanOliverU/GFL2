@@ -1,0 +1,217 @@
+{
+  "revision": "b513938",
+  "sourceHash": "9827c8ca0352",
+  "conditions": "same build/page/model/pose; fixed camera; headless Chrome 1280x720; WebGL2 SwiftShader; alternating A/B order; median of four 4-second rAF samples",
+  "renderer": "WebGL2",
+  "idle": {
+    "baseline": {
+      "fpsMedian": 8.819098947152984,
+      "frameMsAvgMedian": 115.44571428571436,
+      "frameMsP95Median": 127.34999999999854,
+      "activeMeshes": 103,
+      "activeIndices": 238146,
+      "totalMeshes": 380,
+      "drawCallsPerFrame": 119,
+      "samples": [
+        {
+          "label": "idle baseline r1",
+          "fps": 9.060854658996815,
+          "frameMsAvg": 112.625,
+          "frameMsP95": 121.30000000000109,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "idle baseline r2",
+          "fps": 8.821583474233622,
+          "frameMsAvg": 115.56857142857147,
+          "frameMsP95": 127.30000000000291,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "idle baseline r3",
+          "fps": 8.772784871823049,
+          "frameMsAvg": 116.10857142857141,
+          "frameMsP95": 127.40000000000146,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "idle baseline r4",
+          "fps": 8.816614420072348,
+          "frameMsAvg": 115.32285714285723,
+          "frameMsP95": 127.39999999999418,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        }
+      ]
+    },
+    "locomotion": {
+      "fpsMedian": 9.11046127376309,
+      "frameMsAvgMedian": 111.28055555555557,
+      "frameMsP95Median": 118.19999999999891,
+      "activeMeshes": 103,
+      "activeIndices": 238146,
+      "totalMeshes": 380,
+      "drawCallsPerFrame": 119,
+      "samples": [
+        {
+          "label": "idle locomotion r1",
+          "fps": 9.18250856207219,
+          "frameMsAvg": 109.93055555555556,
+          "frameMsP95": 115.29999999999927,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "idle locomotion r2",
+          "fps": 9.15207282081388,
+          "frameMsAvg": 111.28333333333336,
+          "frameMsP95": 121.09999999999854,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "idle locomotion r3",
+          "fps": 8.458763527801965,
+          "frameMsAvg": 119.18181818181819,
+          "frameMsP95": 133.40000000000146,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "idle locomotion r4",
+          "fps": 9.0688497267123,
+          "frameMsAvg": 111.27777777777777,
+          "frameMsP95": 115.20000000000437,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        }
+      ]
+    },
+    "frameTimeDelta": -0.03607893767152348
+  },
+  "moving": {
+    "baseline": {
+      "fpsMedian": 8.803806527544022,
+      "frameMsAvgMedian": 114.79991596638652,
+      "frameMsP95Median": 127.30000000000291,
+      "activeMeshes": 103,
+      "activeIndices": 238146,
+      "totalMeshes": 380,
+      "drawCallsPerFrame": 119,
+      "samples": [
+        {
+          "label": "moving baseline r1",
+          "fps": 8.749781255471879,
+          "frameMsAvg": 114.79411764705883,
+          "frameMsP95": 127.20000000000437,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "moving baseline r2",
+          "fps": 8.857831799616166,
+          "frameMsAvg": 114.8057142857142,
+          "frameMsP95": 127.40000000000146,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "moving baseline r3",
+          "fps": 8.390503923803738,
+          "frameMsAvg": 119.5575757575758,
+          "frameMsP95": 133.40000000000146,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "moving baseline r4",
+          "fps": 9.068405186150716,
+          "frameMsAvg": 112.2861111111112,
+          "frameMsP95": 115.60000000000582,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        }
+      ]
+    },
+    "locomotion": {
+      "fpsMedian": 9.033207346221541,
+      "frameMsAvgMedian": 112.62361111111113,
+      "frameMsP95Median": 121.25000000000364,
+      "activeMeshes": 103,
+      "activeIndices": 238146,
+      "totalMeshes": 380,
+      "drawCallsPerFrame": 119,
+      "samples": [
+        {
+          "label": "moving locomotion r1",
+          "fps": 9.03938239030588,
+          "frameMsAvg": 112.45833333333333,
+          "frameMsP95": 121.20000000000437,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "moving locomotion r2",
+          "fps": 9.027032302137204,
+          "frameMsAvg": 112.78888888888893,
+          "frameMsP95": 121.30000000000291,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "moving locomotion r3",
+          "fps": 8.741040433552353,
+          "frameMsAvg": 116.43529411764715,
+          "frameMsP95": 127.30000000000291,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        },
+        {
+          "label": "moving locomotion r4",
+          "fps": 9.05619737615369,
+          "frameMsAvg": 111.94999999999992,
+          "frameMsP95": 121.10000000000582,
+          "activeMeshes": 103,
+          "activeIndices": 238146,
+          "totalMeshes": 380,
+          "drawCallsPerFrame": 119
+        }
+      ]
+    },
+    "frameTimeDelta": -0.018957373243309816
+  },
+  "errors": []
+}

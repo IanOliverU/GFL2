@@ -23,6 +23,19 @@ export interface WorldRefs {
   bossGate: Vector3;
   bounds: number;
   walkwayTop: number;
+  /**
+   * Optional stage-specific ground heights (tram circuit). When absent the
+   * Green Zone heightfield (groundHeightAt/controllerGroundHeightAt) applies.
+   * Stages that set these own ALL height queries for their world; sim helpers
+   * prefer them and fall back to the Green Zone functions otherwise, so Green
+   * Zone behavior is byte-identical when unset.
+   */
+  groundHeightAt?: (x: number, z: number) => number;
+  controllerGroundHeightAt?: (x: number, z: number, currentY: number) => number;
+  /** Optional stage-specific boss arrival point (tram: inside the circuit). */
+  bossSpawn?: Vector3;
+  /** Optional stage-specific player spawn (tram: apron pad). */
+  playerSpawn?: { pos: Vector3; yaw: number };
 }
 
 export function groundHeightAt(x: number, z: number): number {

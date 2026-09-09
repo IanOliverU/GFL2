@@ -63,6 +63,7 @@ Movement and pointer-lock look are owned by the fixed-step simulation. Babylon's
 - `src/game.ts` — renderer setup, game states, fixed-step orchestration, modal queues, restart/loop transitions.
 - `src/sim.ts` — player, combat, abilities, enemies, director, pickups, relay, and pooled effects.
 - `src/chaser.ts` — original articulated ordinary-Chaser visual and pure procedural pose kernel.
+- `src/tololo-visual.ts` — local-only PMX fit, rifle hold/IK, synchronous weapon pose, and velocity-driven procedural locomotion.
 - `src/config.ts` — characters, weapons, skills, progression tuning, attachments, enemies, and boss data.
 - `src/controls.ts` / `src/input.ts` — camera-relative control math and pointer-lock input lifecycle.
 - `src/world.ts` — deliberate stage construction, ground routing, collision, and ray queries.
@@ -86,7 +87,7 @@ Shortcuts are enabled only with `?dev=1`: `K` kills active enemies, `L` grants X
 
 ## Current limitations
 
-- Placeholder character geometry has no authored animation clips. The ordinary Chaser is the first articulated enemy (procedural idle, locomotion, attack, hit, and death); other enemies retain their milestone placeholders.
+- Placeholder character geometry has no authored animation clips. The local-only Tololo PMX review slice has procedural armed locomotion, and the ordinary Chaser has procedural idle, locomotion, attack, hit, and death; other characters and enemies retain their milestone placeholders.
 - Sound is synthesized in Web Audio rather than sourced from authored audio files.
 - Collision and navigation use a lightweight controller, AABBs, ground-height routing, and obstacle steering instead of Havok/navmesh. This keeps the build dependency-light and deterministic for the handcrafted map.
 - The target 12–15 minute first run is a balance goal. Actual duration varies with accuracy, exploration, and time spent inside the relay ring.
@@ -101,3 +102,9 @@ comparison, review artifacts, and remaining acceptance gate are recorded in
 `docs/chaser-milestone.md`. With the dev server running, use
 `npm run test:chaser-review`; for the same-build A/B in PowerShell, set
 `$env:PERF_TAG="before"` or `"after"` before `npm run perf:chaser`.
+
+Tololo's local-only locomotion architecture, verification matrix, same-build
+performance comparison, review artifacts, licensing constraints, and remaining
+owner acceptance gate are recorded in `docs/tololo-locomotion-milestone.md`.
+With the staged PMX and dev server running, use
+`npm run test:tololo-locomotion` and `npm run perf:tololo`.

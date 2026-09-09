@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { Quaternion, Vector3 } from "@babylonjs/core/Maths/math.vector";
 import {
+  newTololoLocomotionState, stepTololoLocomotion, tololoLegPose, tololoLocalVelocity,
   tololoHoldMount, tololoModelToPlayer, tololoPlayerToModel, tololoPlayerToWorld,
   tololoPoseParams, tololoQuatFromTo, tololoSolveTwoBoneIk,
 } from "../src/tololo-visual";
@@ -105,6 +106,90 @@ describe("tololo pose params", () => {
   it("stays within sane joint ranges", () => {
     for (const v of Object.values(tololoPoseParams)) {
       expect(Math.abs(v)).toBeLessThanOrEqual(1.6);
+    }
+  });
+});
+
+describe("tololo locomotion", () => {
+  it("projects resolved world velocity relative to facing", () => {
+    expect(tololoLocalVelocity(0, -7, 0)).toEqual({ forward: 7, right: 0 });
+    const turned = tololoLocalVelocity(-7, 0, Math.PI / 2);
+    expect(turned.forward).toBeCloseTo(7);
+    expect(turned.right).toBeCloseTo(0);
+    expect(tololoLocalVelocity(4, 0, 0)).toEqual({ forward: 0, right: 4 });
+  });
+
+  it("preserves forward, reverse, and strafe signs through smoothing", () => {
+    const forward = newTololoLocomotionState();
+    stepTololoLocomotion(forward, 0, -7, 0, true, false, 1 / 60);
+    expect(forward.forward).toBeGreaterThan(0);
+    expect(forward.right).toBeCloseTo(0);
+
+    const reverse = newTololoLocomotionState();
+    stepTololoLocomotion(reverse, 0, 7, 0, true, false, 1 / 60);
+    expect(reverse.forward).toBeLessThan(0);
+
+    const strafe = newTololoLocomotionState();
+    stepTololoLocomotion(strafe, 7, 0, 0, true, false, 1 / 60);
+    expect(strafe.right).toBeGreaterThan(0);
+  });
+
+  it("advances phase from travel and freezes it when collision resolves to zero", () => {
+    const state = newTololoLocomotionState();
+    stepTololoLocomotion(state, 0, -7, 0, true, false, 1 / 60);
+    expect(state.phase).toBeGreaterThan(0);
+    const phase = state.phase;
+    for (let i = 0; i < 20; i++) {
+      stepTololoLocomotion(state, 0, 0, 0, true, false, 1 / 60);
+    }
+    expect(state.phase).toBe(phase);
+    expect(Math.hypot(state.forward, state.right)).toBeLessThan(0.1);
+  });
+
+  it("fades grounded gait during airborne and dodge states", () => {
+    const state = { phase: 1, forward: 7, right: 0, weight: 1 };
+    stepTololoLocomotion(state, 0, -7, 0, false, false, 0.05);
+    const airborneWeight = state.weight;
+    expect(airborneWeight).toBeLessThan(1);
+    stepTololoLocomotion(state, 0, -7, 0, true, true, 0.05);
+    expect(state.weight).toBeLessThan(airborneWeight);
+  });
+
+  it("blends a direction reversal through zero without a phase jump", () => {
+    const state = { phase: 2, forward: 7, right: 0, weight: 1 };
+    stepTololoLocomotion(state, 0, 7, 0, true, false, 1 / 60);
+    expect(state.forward).toBeGreaterThan(0);
+    expect(state.forward).toBeLessThan(7);
+    expect(state.phase).toBeGreaterThan(2);
+  });
+
+  it("mirrors left and right strafe blends", () => {
+    const left = newTololoLocomotionState();
+    const right = newTololoLocomotionState();
+    stepTololoLocomotion(left, -7, 0, 0, true, false, 1 / 60);
+    stepTololoLocomotion(right, 7, 0, 0, true, false, 1 / 60);
+    expect(left.right).toBeCloseTo(-right.right);
+    expect(left.weight).toBeCloseTo(right.weight);
+    expect(left.phase).toBeCloseTo(right.phase);
+  });
+
+  it("caps a long render frame before advancing blend and phase", () => {
+    const capped = newTololoLocomotionState();
+    const reference = newTololoLocomotionState();
+    stepTololoLocomotion(capped, 0, -7, 0, true, false, 0.25);
+    stepTololoLocomotion(reference, 0, -7, 0, true, false, 0.05);
+    expect(capped).toEqual(reference);
+  });
+
+  it("blends diagonal and sprint poses within restrained joint ranges", () => {
+    const diagonal = tololoLegPose({ phase: Math.PI / 2, forward: 5, right: 5, weight: 1 }, 0);
+    expect(diagonal.thighPitchL).not.toBeCloseTo(diagonal.thighPitchR);
+    expect(diagonal.thighRollL).not.toBeCloseTo(0.07);
+    const sprint = tololoLegPose({ phase: Math.PI / 2, forward: 10, right: 0, weight: 1 }, 0);
+    expect(sprint.run).toBe(1);
+    for (const angle of Object.values(sprint).slice(0, 12)) {
+      expect(Number.isFinite(angle)).toBe(true);
+      expect(Math.abs(angle)).toBeLessThanOrEqual(0.7);
     }
   });
 });

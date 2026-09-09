@@ -1,0 +1,130 @@
+{
+  "status": "tram review evidence (NOT suitability accepted)",
+  "conditions": "headless Chrome 1280x720, forced WebGL2, real GPU (D3D11 ANGLE)",
+  "gpuMode": "hardware",
+  "launchUrl": "/?dev=1&scene=tram-review&autostart=1&char=tololo&god=1&nolock=1&renderer=webgl",
+  "captures": [
+    "tram-overview.png",
+    "tram-scale-tololo.png",
+    "tram-third-person.png",
+    "tram-aim-fire.png",
+    "tram-passage.png",
+    "tram-relay.png",
+    "tram-fight.png",
+    "tram-review-walkthrough.webm"
+  ],
+  "loadWaitMs": 1769,
+  "webglRenderer": "ANGLE (AMD, AMD Radeon RX 9070 (0x00007550) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  "tramPhase": "ready",
+  "tramError": null,
+  "stats": {
+    "meshCount": 834,
+    "materialCount": 76,
+    "textureCount": 82,
+    "totalIndices": 1837392,
+    "approxTriangles": 612464,
+    "disabledCameras": 0,
+    "disabledLights": 0,
+    "boundsMin": {
+      "_isDirty": true,
+      "_x": -302.9313581293212,
+      "_y": -1.7999999523162842,
+      "_z": -417.3886910964253
+    },
+    "boundsMax": {
+      "_isDirty": true,
+      "_x": 364.8370921908448,
+      "_y": 65.90234823104402,
+      "_z": 417.38868472619447
+    }
+  },
+  "timings": {
+    "startMs": 528.6999999992549,
+    "firstProgressMs": 535.3999999985099,
+    "doneMs": 1739,
+    "totalMs": 1210.300000000745,
+    "loadedBytes": 85747364,
+    "totalBytes": 85747364
+  },
+  "renderer": "WebGL2",
+  "sceneMeshes": 1087,
+  "greenZoneAbsent": true,
+  "walk": {
+    "z": 48.21,
+    "speed": 7.2,
+    "gait": 0.9999999219169231
+  },
+  "aimFire": {
+    "aiming": true,
+    "ammo": 23
+  },
+  "relay": {
+    "active": true,
+    "dist": 2
+  },
+  "cache": {
+    "taken": [
+      true,
+      false,
+      false
+    ],
+    "caches": 3
+  },
+  "boundary": {
+    "northZ": 44.85,
+    "kioskX": 8.85
+  },
+  "combat": {
+    "enemies": 8,
+    "articulated": 5
+  },
+  "restart": {
+    "meshesBefore": 1087,
+    "meshesAfter": 1087,
+    "cachesReset": true,
+    "relayReset": true,
+    "tramStillLoaded": "ready"
+  },
+  "perf": {
+    "idle": {
+      "label": "tram idle lane",
+      "fps": 164.93952217514092,
+      "frameMsAvg": 6.072672064777331,
+      "frameMsP95": 6.200000000000728,
+      "activeMeshes": 310,
+      "activeIndices": 619662,
+      "totalMeshes": 1087,
+      "drawCallsPerFrame": 303.72727272727275
+    },
+    "traversal": {
+      "label": "tram traversal",
+      "fps": 165.55629580277767,
+      "frameMsAvg": 6.060685483870965,
+      "frameMsP95": 6.200000000000728,
+      "activeMeshes": 295,
+      "activeIndices": 562692,
+      "totalMeshes": 1087,
+      "drawCallsPerFrame": 297.3319919517103
+    },
+    "combat": {
+      "label": "tram 8-enemy fight",
+      "fps": 164.43645562872518,
+      "frameMsAvg": 6.097160243407711,
+      "frameMsP95": 6.200000000000728,
+      "activeMeshes": 321,
+      "activeIndices": 708561,
+      "totalMeshes": 1161,
+      "drawCallsPerFrame": 312.56275303643724
+    }
+  },
+  "gzBaseline": {
+    "label": "green zone idle spawn",
+    "fps": 164.88458079342413,
+    "frameMsAvg": 6.072874493927132,
+    "frameMsP95": 6.199999999999818,
+    "activeMeshes": 115,
+    "activeIndices": 240390,
+    "totalMeshes": 406,
+    "drawCallsPerFrame": 120.78585858585859
+  }
+}

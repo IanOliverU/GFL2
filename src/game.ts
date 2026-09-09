@@ -17,7 +17,8 @@ import { GameUI, HudState } from "./ui";
 import { eligibleChoices, rollChoices, applyChoice, UpgradeChoice } from "./progression";
 import { synth, loadSettings, saveSettings, Settings } from "./audio";
 import { tryLoadCharacterAsset } from "./assets";
-import { getTololoRest, measureTololoHold, mountRifleToHand, parkTololoSpare, restoreRifleHip, takeSpareTololo, tickTololoVisual, tryLoadTololoPmx } from "./tololo-visual";
+import { TRAM_SPAWN_POS, TRAM_SPAWN_YAW, buildTramReviewWorld, disposeTramReview, isTramReviewRequested, loadTramReviewStation, tramGroundHeightAt, tramProbeGrid, tramReviewView, tramTrimOutside, type TramReviewLoad } from "./tram-review";
+import { getTololoRest, measureTololoHold, mountRifleToHand, parkTololoSpare, resetTololoLocomotion, restoreRifleHip, takeSpareTololo, tickTololoVisual, tololoLocomotionMode, tryLoadTololoPmx } from "./tololo-visual";
 import { isAttachmentCompatible, nextLoopTransition } from "./rules";
 
 type State = "title" | "select" | "playing" | "paused" | "levelup" | "equip" | "compare" | "victory" | "defeat";
@@ -41,6 +42,12 @@ export class Game {
   // Tololo art-slice state (unapproved, local review only).
   private visualChar: string | null = null;
   private visualToken = 0;
+  // Tram-station suitability review (dev-only, local evaluation, never shipped).
+  readonly tramRequested: boolean = isTramReviewRequested(new URLSearchParams(location.search));
+  tramLoad: TramReviewLoad | null = null;
+  tramStatus: { phase: string; loaded: number; total: number | null; error: string | null } = {
+    phase: "idle", loaded: 0, total: null, error: null,
+  };
   // Dev-only camera override for art review (?dev=1 console use). Null = gameplay camera.
   debugCamera: { pos: Vector3; target: Vector3 } | null = null;
   dev = new URLSearchParams(location.search);
@@ -123,7 +130,10 @@ export class Game {
     dir.shadowMinZ = 1;
     dir.shadowMaxZ = 140;
 
-    this.world = buildWorld(this.scene);
+    // Isolated review route: the Green Zone and the station are never loaded
+    // together. Normal gameplay (including all tests) always builds the
+    // Green Zone; the station world exists only with ?dev=1&scene=tram-review.
+    this.world = this.tramRequested ? buildTramReviewWorld(this.scene) : buildWorld(this.scene);
     this.sim = new Simulation(this.scene, this.world, {
       damageNumber: (d) => {
         const p = this.worldToScreen(d.pos);
@@ -150,6 +160,24 @@ export class Game {
           ? measureTololoHold(this.sim.externalRoot, this.sim, this.sim.pos, this.sim.yaw, this.sim.pitch)
           : null,
         rest: () => (this.sim.externalRoot ? getTololoRest(this.sim.externalRoot) : null),
+        locomotionEnabled: (enabled: boolean) => { tololoLocomotionMode.enabled = enabled; },
+      };
+      // Tram-station review controls for the browser harness (dev only).
+      (window as unknown as { __tramReview: unknown }).__tramReview = {
+        status: () => ({ ...this.tramStatus, requested: this.tramRequested, loaded: !!this.tramLoad }),
+        stats: () => this.tramLoad?.stats ?? null,
+        timings: () => this.tramLoad?.timings ?? null,
+        view: (name: string) => {
+          const v = tramReviewView(name);
+          this.debugCamera = { pos: v.pos, target: v.target };
+        },
+        play: () => { this.debugCamera = null; },
+        exit: () => this.exitTramReview(),
+        probeGrid: (x0: number, x1: number, xs: number, z0: number, z1: number, zs: number, originY = 120) =>
+          tramProbeGrid(this.scene, x0, x1, xs, z0, z1, zs, originY),
+        trimOutside: (x0: number, x1: number, z0: number, z1: number) =>
+          this.tramLoad ? tramTrimOutside(this.tramLoad, x0, x1, z0, z1) : null,
+        groundAt: (x: number, z: number) => tramGroundHeightAt(x, z),
       };
     }
     this.applyControlSettings();
@@ -200,6 +228,7 @@ export class Game {
 
   // ---------- states ----------
   toTitle(): void {
+    if (this.tramLoad) this.exitTramReview();
     this.state = "title";
     this.releaseGameplayInput();
     this.attachmentQueue = [];
@@ -235,6 +264,7 @@ export class Game {
     this.ui.closeModal();
     this.ui.resetTransient();
     this.sim.startRun(charId);
+    if (this.sim.externalRoot) resetTololoLocomotion(this.sim.externalRoot);
     this.attachmentQueue = [];
     this.pendingAttach = null;
     this.state = "playing";
@@ -257,6 +287,7 @@ export class Game {
     if (charId === "tololo" && this.sim.externalStatus !== "pmx") {
       const spare = takeSpareTololo();
       if (spare) {
+        resetTololoLocomotion(spare);
         this.sim.setExternalVisual(spare, "pmx");
         mountRifleToHand(this.sim);
       } else {
@@ -282,6 +313,78 @@ export class Game {
   restart(): void {
     const id = this.sim.build?.charId ?? "tololo";
     this.startRun(id);
+    this.placeTramSpawn();
+  }
+
+  /**
+   * Tram circuit spawn placement: startRun resets to the Green Zone pad, so
+   * restart/loop/enter paths re-place inside the circuit when the review
+   * world is active. Green Zone behavior untouched (no-op there).
+   */
+  private placeTramSpawn(): void {
+    if (!this.tramRequested || !this.tramLoad) return;
+    const spawn = this.sim.world.playerSpawn;
+    if (!spawn) return;
+    this.sim.pos.copyFrom(spawn.pos);
+    this.sim.pos.y = spawn.pos.y;
+    this.sim.vel.set(0, 0, 0);
+    this.sim.visualVel.set(0, 0, 0);
+    this.sim.yaw = spawn.yaw;
+    this.sim.pitch = -0.08;
+    this.sim.playerMesh.position.copyFrom(this.sim.pos);
+    this.sim.updateCamera(1, false);
+  }
+
+  /**
+   * Tram-station review entry (dev-only, explicit ?dev=1&scene=tram-review).
+   * Loads the unmodified station GLB over the review-only flat world, places
+   * Tololo on the marked test lane, and frames the overview camera. The Green
+   * Zone was never built in this mode, so both environments cannot coexist.
+   * Tololo locomotion, rifle hold, firing origin, and camera controls are
+   * reused untouched. Failure leaves the flat lane playable and reports a
+   * useful message; normal Green Zone play is unaffected (reload without the
+   * scene parameter).
+   */
+  async enterTramReview(): Promise<boolean> {
+    if (!this.tramRequested || this.tramLoad) return !!this.tramLoad;
+    this.tramStatus = { phase: "loading", loaded: 0, total: null, error: null };
+    this.ui.toast("Tram review: loading station…", 3600);
+    try {
+      this.tramLoad = await loadTramReviewStation(this.scene, (loaded, total) => {
+        this.tramStatus = { phase: "loading", loaded, total, error: null };
+      });
+      this.sim.pos.copyFrom(TRAM_SPAWN_POS);
+      this.sim.vel.set(0, 0, 0);
+      this.sim.visualVel.set(0, 0, 0);
+      this.sim.yaw = TRAM_SPAWN_YAW;
+      this.sim.pitch = -0.08;
+      this.sim.playerMesh.position.copyFrom(this.sim.pos);
+      this.sim.updateCamera(1, false);
+      const v = tramReviewView("overview");
+      this.debugCamera = { pos: v.pos, target: v.target };
+      this.tramStatus = {
+        phase: "ready", loaded: this.tramLoad.timings.loadedBytes,
+        total: this.tramLoad.timings.totalBytes, error: null,
+      };
+      this.ui.toast("Tram review ready — connected circuit playable (apron, kiosk passage, platform).", 3600);
+      return true;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.tramStatus = { phase: "failed", loaded: 0, total: null, error: msg };
+      this.ui.toast(`Tram review failed: ${msg} — flat ground still playable.`, 6000);
+      console.warn("[tram-review] load failed:", err);
+      return false;
+    }
+  }
+
+  /** Dispose the review station and its review-only props (Green Zone was never built). */
+  exitTramReview(): void {
+    if (!this.tramLoad) return;
+    disposeTramReview(this.scene, this.tramLoad);
+    this.tramLoad = null;
+    this.debugCamera = null;
+    this.tramStatus = { phase: "idle", loaded: 0, total: null, error: null };
+    this.ui.toast("Tram review unloaded.", 2600);
   }
 
   pause(): void {
@@ -350,6 +453,7 @@ export class Game {
     const bonusMax = this.sim.maxHp - this.sim.def.hp;
     const loop = nextLoopTransition(this.sim.loop).loop;
     this.sim.startRun(keep.charId, loop, keep);
+    this.placeTramSpawn();
     this.sim.maxHp = this.sim.def.hp + Math.max(0, bonusMax);
     this.sim.hp = this.sim.maxHp;
     this.sim.relayActive = false;
@@ -562,9 +666,13 @@ export class Game {
     // Tololo procedural visual: pose + skin upload + rifle seating.
     // Render-dt driven (not fixed-step); frozen while paused; combat untouched.
     if (playing && this.sim.externalStatus === "pmx" && this.sim.externalRoot) {
-      const spd = Math.hypot(this.sim.vel.x, this.sim.vel.z);
+      const spd = Math.hypot(this.sim.visualVel.x, this.sim.visualVel.z);
       tickTololoVisual(this.sim.externalRoot, this.sim, rdt, {
         speed: spd,
+        velocityX: this.sim.visualVel.x,
+        velocityZ: this.sim.visualVel.z,
+        yaw: this.sim.yaw,
+        grounded: this.sim.grounded(),
         aiming: this.sim.aiming,
         pitch: this.sim.pitch,
         recoil: this.sim.gunRecoil,

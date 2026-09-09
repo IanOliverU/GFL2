@@ -1,7 +1,10 @@
 // Repeatable local-only staging for the Tololo PMX art slice.
-// Copies the untouched source tree into public/mmd/tololo, preserving the
-// relative Textures/ + spa/ layout the PMX references with backslash paths.
-// Nothing here commits anything: public/mmd is git-ignored (see .gitignore).
+// Copies the untouched source tree into .local-assets/mmd/tololo, preserving
+// the relative Textures/ + spa/ layout the PMX references with backslash paths.
+// .local-assets/ is git-ignored AND outside public/, so `vite build` can never
+// package it: dev serves it via the localAssetsDevPlugin middleware in
+// vite.config.ts, while production falls back to placeholders (by design).
+// Nothing here commits anything (see .gitignore).
 // Usage: node scripts/stage-tololo.mjs [--check-only]
 import { cpSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -13,7 +16,7 @@ const PMX_NAME = "GirlsFrontline TololoDefault.pmx";
 // Renamed on stage: identical bytes, URL-safe name. The PMX only references
 // Textures\ and spa\ relatively, so renaming the file itself is safe.
 const STAGED_PMX = "tololo.pmx";
-const DEST = path.join(projectRoot, "public", "mmd", "tololo");
+const DEST = path.join(projectRoot, ".local-assets", "mmd", "tololo");
 
 // Every texture path referenced by the PMX (forward-slash form). The staging
 // check fails if any are missing so a bad copy can never silently ship.
@@ -72,4 +75,4 @@ let bytes = 0;
 for (const rel of [...REQUIRED, STAGED_PMX]) {
   bytes += statSync(path.join(DEST, ...rel.split("/"))).size;
 }
-console.log(`[stage-tololo] verified: PMX + ${REQUIRED.length} textures (${(bytes / 1048576).toFixed(1)} MB), local-only under public/mmd/`);
+console.log(`[stage-tololo] verified: PMX + ${REQUIRED.length} textures (${(bytes / 1048576).toFixed(1)} MB), local-only under .local-assets/mmd/`);

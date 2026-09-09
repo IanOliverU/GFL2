@@ -1,8 +1,10 @@
 # Tololo — owner-accepted working gameplay baseline
 
 Scale, hold, grounding, firing origin, RMB aim/zoom, movement, and camera
-behavior are the accepted working baseline. Final art-direction acceptance is
-still pending, and reload/walk/run/dodge animation polish remains deferred.
+behavior are the accepted working baseline. Procedural lower-body locomotion is
+now ready for review in `docs/tololo-locomotion-milestone.md`; visual acceptance
+is still pending, and reload/jump/dodge/hit/death animation production remains
+deferred.
 
 Review question: **Does Tololo belong in this environment, and should the rest of the game follow this visual direction?**
 Visual acceptance is pending reviewer approval. Do not commit, push, or deploy any part of this slice.
@@ -27,7 +29,9 @@ PMX header text (verbatim):
 Consequences enforced by this workflow:
 
 - Original PMX/textures stay under git-ignored `assets/` and are never committed.
-- Staged runtime copies under `public/mmd/` are git-ignored local-only files.
+- Staged runtime copies under git-ignored `.local-assets/mmd/` are local-only
+  files served by `vite dev` middleware only; `vite build` can never package
+  them (`scripts/check-prod-assets.mjs` fails the build otherwise).
 - No derived GLB/VMD/output is committed until explicit approval.
 - Current use is local prototype review only (non-commercial, non-redistributed).
 - A clean-room or licensed replacement is still required before any release.
@@ -70,7 +74,7 @@ PMX materials include BodySkin, Clothing (×several), Jacket, Skirt, Socks, Face
 
 babylon-mmd 1.3.0 is already a dependency and its peer (`@babylonjs/core ^9.15.0`) is satisfied by the pinned 9.25.0 — no engine change. No existing babylon-mmd integration existed, so this slice introduces the smallest viable one:
 
-1. `node scripts/stage-tololo.mjs` copies the source tree to `public/mmd/tololo/` (local-only, git-ignored), renames the PMX bytes to URL-safe `tololo.pmx`, and verifies all 13 referenced textures.
+1. `node scripts/stage-tololo.mjs` copies the source tree to `.local-assets/mmd/tololo/` (local-only, git-ignored, outside `public/` so production builds cannot package it), renames the PMX bytes to URL-safe `tololo.pmx`, and verifies all 13 referenced textures.
 2. `src/assets.ts` loads the staged PMX at runtime with babylon-mmd (`LoadAssetContainerAsync`), fits scale from the measured bounding box, grounds the root at the simulation position, and parents it to the player's `playerMesh` node.
 3. Failure (missing/staged-corrupt PMX) logs a warning and keeps the stylized placeholder — gameplay is never blocked.
 4. No MMD animation/physics runtime is started in this slice (bind pose only); full animation production is explicitly out of scope.
@@ -93,8 +97,8 @@ The test dresses the existing stage in place (`src/courtyard.ts`, called from `b
 
 ## 7. Output paths (all local-only until approved)
 
-- Staged model: `public/mmd/tololo/tololo.pmx` (byte-identical rename of the source PMX) + `Textures/`, `spa/` (git-ignored).
-- Served at: `/mmd/tololo/tololo.pmx` (dev server only).
+- Staged model: `.local-assets/mmd/tololo/tololo.pmx` (byte-identical rename of the source PMX) + `Textures/`, `spa/` (git-ignored, outside `public/`).
+- Served at: `/mmd/tololo/tololo.pmx` (dev-server middleware only; production 404s into the placeholder fallback).
 - Required views: `artifacts/tololo-front.png`, `artifacts/tololo-side.png`, `artifacts/tololo-back.png`, `artifacts/tololo-gameplay.png`.
 - Inspection extras: `artifacts/tololo-face.png` (face/eyes/hair close-up), `artifacts/tololo-fallback.png` (placeholder fallback proof).
 - Repeatable captures: `scripts/tololo-shots.mjs` (fallback + attach + 4 views + collision, asserts zero page/console errors).

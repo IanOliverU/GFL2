@@ -118,6 +118,8 @@ export class Simulation {
   // player state
   pos = new Vector3(0, 0, 10);
   vel = new Vector3(0, 0, 0);
+  /** Collision-resolved horizontal velocity for presentation only. */
+  visualVel = new Vector3(0, 0, 0);
   yaw = Math.PI; pitch = -0.15;
   hp = 100; maxHp = 100; shield = 0; maxShield = 0;
   alive = true;
@@ -204,6 +206,20 @@ export class Simulation {
 
   get def() { return getCharacter(this.build.charId); }
 
+  /**
+   * Stage-aware ground height. Green Zone worlds leave these unset and get the
+   * legacy heightfield; the tram circuit provides its own (platform + ramps).
+   */
+  private gh(x: number, z: number): number {
+    return this.world.groundHeightAt ? this.world.groundHeightAt(x, z) : groundHeightAt(x, z);
+  }
+
+  private cgh(x: number, z: number, currentY: number): number {
+    return this.world.controllerGroundHeightAt
+      ? this.world.controllerGroundHeightAt(x, z, currentY)
+      : controllerGroundHeightAt(x, z, currentY);
+  }
+
   startRun(charId: CharId, loop = 0, keepBuild?: PlayerBuild): void {
     const def = getCharacter(charId);
     this.clearEntities();
@@ -229,6 +245,7 @@ export class Simulation {
     this.alive = true;
     this.pos = new Vector3(4, 0, 12);
     this.vel.set(0, 0, 0);
+    this.visualVel.set(0, 0, 0);
     this.yaw = 0; this.pitch = -0.15;
     this.ammo = this.magSize(); this.reloading = 0; this.fireTimer = 0;
     this.skillCD = [0, 0, 0];
@@ -620,6 +637,8 @@ export class Simulation {
   // ----- player -----
   private updatePlayer(dt: number): void {
     const def = this.def;
+    const startX = this.pos.x;
+    const startZ = this.pos.z;
     // look
     const { dx, dy } = this.input.consumeLook();
     const look = applyMouseLook(this.yaw, this.pitch, dx, dy, this.sensitivity, this.invertLookX, this.invertLookY);
@@ -639,7 +658,7 @@ export class Simulation {
     this.vel.z += (mz * speed - this.vel.z) * Math.min(1, accel * dt / Math.max(1, speed));
 
     // jump / gravity
-    const g = controllerGroundHeightAt(this.pos.x, this.pos.z, this.pos.y);
+    const g = this.cgh(this.pos.x, this.pos.z, this.pos.y);
     if (this.input.wasPressed("Space") && this.pos.y <= g + 0.05) {
       this.vel.y = 7.4;
       this.pos.y += 0.02;
@@ -647,11 +666,13 @@ export class Simulation {
     this.vel.y -= 21 * dt;
     moveHorizontalSafe(this.pos, this.vel.x * dt, this.vel.z * dt, 0.55, this.world.colliders, this.world.bounds);
     this.pos.y += this.vel.y * dt;
-    const g2 = controllerGroundHeightAt(this.pos.x, this.pos.z, this.pos.y);
+    const g2 = this.cgh(this.pos.x, this.pos.z, this.pos.y);
     if (this.pos.y <= g2) { this.pos.y = g2; this.vel.y = 0; }
     // snap down small steps (ramps)
-    const g3 = controllerGroundHeightAt(this.pos.x, this.pos.z, this.pos.y);
+    const g3 = this.cgh(this.pos.x, this.pos.z, this.pos.y);
     if (this.vel.y <= 0 && this.pos.y - g3 < 1.2 && this.pos.y >= g3) { this.pos.y = g3; this.vel.y = 0; }
+    // Unlike vel, this reflects sliding/stopping after collision resolution.
+    this.visualVel.set((this.pos.x - startX) / dt, 0, (this.pos.z - startZ) / dt);
 
     // dodge (Ctrl)
     this.dodgeCD = Math.max(0, this.dodgeCD - dt);
@@ -723,8 +744,8 @@ export class Simulation {
     this.gunMesh.position.z = 0.35 - this.gunRecoil * 0.35;
   }
 
-  private grounded(): boolean {
-    return this.pos.y <= controllerGroundHeightAt(this.pos.x, this.pos.z, this.pos.y) + 0.05;
+  grounded(): boolean {
+    return this.pos.y <= this.cgh(this.pos.x, this.pos.z, this.pos.y) + 0.05;
   }
 
   private startReload(): void {
@@ -1021,7 +1042,7 @@ export class Simulation {
       if (idx === 1) {
         const f = new Vector3(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
         const p = new Vector3(this.pos.x + f.x * 4, 0, this.pos.z + f.z * 4);
-        p.y = groundHeightAt(p.x, p.z);
+        p.y = this.gh(p.x, p.z);
         const mesh = MeshBuilder.CreateDisc(`trap-${Date.now()}`, { radius: 3 + rank * 0.3, tessellation: 32 }, this.scene);
         mesh.rotation.x = -Math.PI / 2;
         mesh.position = new Vector3(p.x, p.y + 0.1, p.z);
@@ -1050,7 +1071,7 @@ export class Simulation {
         return true;
       }
       if (idx === 1) {
-        const p = this.pos.clone(); p.y = groundHeightAt(p.x, p.z);
+        const p = this.pos.clone(); p.y = this.gh(p.x, p.z);
         const mesh = MeshBuilder.CreateDisc(`prot-${Date.now()}`, { radius: 6 + (rank >= 3 ? 1.5 : 0), tessellation: 40 }, this.scene);
         mesh.rotation.x = -Math.PI / 2;
         mesh.position = new Vector3(p.x, p.y + 0.12, p.z);
@@ -1077,7 +1098,7 @@ export class Simulation {
         return true;
       }
       if (idx === 1) {
-        const p = this.aimPoint.clone(); p.y = groundHeightAt(p.x, p.z);
+        const p = this.aimPoint.clone(); p.y = this.gh(p.x, p.z);
         const mesh = MeshBuilder.CreateDisc(`snare-${Date.now()}`, { radius: 7, tessellation: 40 }, this.scene);
         mesh.rotation.x = -Math.PI / 2;
         mesh.position = new Vector3(p.x, p.y + 0.12, p.z);
@@ -1124,7 +1145,7 @@ export class Simulation {
         const a = (i / n) * Math.PI * 2;
         const r = 3 + (i % 3) * 2.5;
         const p = new Vector3(center.x + Math.cos(a) * r, 0, center.z + Math.sin(a) * r);
-        p.y = groundHeightAt(p.x, p.z);
+        p.y = this.gh(p.x, p.z);
         // telegraph disc
         const mesh = MeshBuilder.CreateDisc(`fin-${Date.now()}-${i}`, { radius: 3.4, tessellation: 28 }, this.scene);
         mesh.rotation.x = -Math.PI / 2;
@@ -1262,7 +1283,7 @@ export class Simulation {
     o.active = true; o.value = value; o.heal = heal; o.life = 40;
     const ox = pos.x + (this.gameplayRandom() - 0.5) * 1.5;
     const oz = pos.z + (this.gameplayRandom() - 0.5) * 1.5;
-    o.pos.set(ox, groundHeightAt(ox, oz) + 1, oz);
+    o.pos.set(ox, this.gh(ox, oz) + 1, oz);
     o.mesh.isVisible = true;
     o.mesh.position.copyFrom(o.pos);
     const m = o.mesh.material as StandardMaterial;
@@ -1335,7 +1356,7 @@ export class Simulation {
         const jx = c.x + (this.gameplayRandom() - 0.5) * 10, jz = c.z + (this.gameplayRandom() - 0.5) * 10;
         const d = Math.hypot(jx - this.pos.x, jz - this.pos.z);
         if (d < 18 || d > 60) continue;
-        const candidate = new Vector3(jx, groundHeightAt(jx, jz), jz);
+        const candidate = new Vector3(jx, this.gh(jx, jz), jz);
         if (!isGroundSpawnValid(candidate, base.radius, this.world.colliders)) continue;
         p = candidate;
         break;
@@ -1343,7 +1364,7 @@ export class Simulation {
       if (!p) return null;
       pos = p;
     }
-    pos.y = groundHeightAt(pos.x, pos.z);
+    pos.y = this.gh(pos.x, pos.z);
     const e = this.makeEnemyMesh(kind, elite, pos);
     e.hp = e.maxHp = Math.round(base.hp * scale.hpMul * (elite ? 2.4 : 1) * (1 + this.loop * 0.5));
     e.speed = base.speed * (elite ? 1.1 : 1) * (0.9 + this.gameplayRandom() * 0.2);
@@ -1422,7 +1443,10 @@ export class Simulation {
   spawnBoss(): void {
     if (this.bossSpawned) return;
     this.bossSpawned = true;
-    const p = new Vector3(46, 0, 2);
+    // Stage-aware arrival: Green Zone keeps the legacy east-arena point;
+    // the tram circuit supplies an in-circuit gate (previous preview data).
+    const spawn = this.world.bossSpawn ?? new Vector3(46, 0, 2);
+    const p = new Vector3(spawn.x, this.gh(spawn.x, spawn.z), spawn.z);
     const e = this.makeEnemyMesh("boss", false, p);
     const hpMul = (1 + this.loop * 0.6) * (1 + this.runTime / 600);
     e.hp = e.maxHp = Math.round(BOSS_DEF.hp * hpMul);
@@ -1527,7 +1551,7 @@ export class Simulation {
               e.telegraphT = 0.9;
               const disc = MeshBuilder.CreateDisc(`htele-${e.id}`, { radius: 5.5, tessellation: 32 }, this.scene);
               disc.rotation.x = -Math.PI / 2;
-              disc.position = new Vector3(e.pos.x, groundHeightAt(e.pos.x, e.pos.z) + 0.15, e.pos.z);
+              disc.position = new Vector3(e.pos.x, this.gh(e.pos.x, e.pos.z) + 0.15, e.pos.z);
               disc.material = stdMat(this.scene, `hteleM-${e.id}-${Date.now()}`, new Color3(1, 0.3, 0.25), new Color3(0.8, 0.15, 0.1));
               e.Telegraph = disc;
               synth.bossWarn();
@@ -1565,7 +1589,7 @@ export class Simulation {
       resolveCircle(e.pos, e.radius, this.world.colliders);
       e.pos.x = Math.max(-this.world.bounds + e.radius, Math.min(this.world.bounds - e.radius, e.pos.x));
       e.pos.z = Math.max(-this.world.bounds + e.radius, Math.min(this.world.bounds - e.radius, e.pos.z));
-      const gy = controllerGroundHeightAt(e.pos.x, e.pos.z, e.pos.y);
+      const gy = this.cgh(e.pos.x, e.pos.z, e.pos.y);
       // enemies climb ramps/stairs smoothly, can't fly
       if (e.pos.y < gy - 0.5 || e.pos.y > gy + 2.5) e.pos.y = gy;
       else e.pos.y += (gy - e.pos.y) * Math.min(1, 10 * dt);
@@ -1701,7 +1725,7 @@ export class Simulation {
           for (let i = 0; i < BOSS_DEF.summonCount + e.bossPhase && this.enemies.length < 30; i++) {
             const a = this.gameplayRandom() * Math.PI * 2;
             const p = new Vector3(e.pos.x + Math.cos(a) * 5, 0, e.pos.z + Math.sin(a) * 5);
-            p.y = groundHeightAt(p.x, p.z);
+            p.y = this.gh(p.x, p.z);
             this.spawnEnemy(this.gameplayRandom() < 0.5 ? "chaser" : "runner", p, false);
           }
           this.events.toast("Warden calls reinforcements!");
@@ -1714,7 +1738,7 @@ export class Simulation {
     }
     // chase slowly
     this.moveEnemy(e, dir.x, dir.z, e.speed * (1 + e.bossPhase * 0.12) * slowed * dt);
-    e.pos.y = controllerGroundHeightAt(e.pos.x, e.pos.z, e.pos.y);
+    e.pos.y = this.cgh(e.pos.x, e.pos.z, e.pos.y);
     // melee
     if (dist < e.attackRange && Math.abs(this.pos.y - e.pos.y) < 2.8 && e.attackT <= 0) {
       e.attackT = e.attackCd;
@@ -1733,7 +1757,7 @@ export class Simulation {
       disc.rotation.x = -Math.PI / 2;
       const px = e.abilityKind === 0 ? e.pos.x : e.pos.x;
       const pz = e.abilityKind === 0 ? e.pos.z : e.pos.z;
-      disc.position = new Vector3(px, groundHeightAt(px, pz) + 0.15, pz);
+      disc.position = new Vector3(px, this.gh(px, pz) + 0.15, pz);
       disc.material = stdMat(this.scene, `bteleM-${Date.now()}`, new Color3(1, 0.25, 0.2), new Color3(0.85, 0.12, 0.1));
       e.Telegraph = disc;
       synth.bossWarn();
@@ -1749,7 +1773,7 @@ export class Simulation {
       s.life -= dt;
       s.pos.x += s.vel.x * dt; s.pos.y += s.vel.y * dt; s.pos.z += s.vel.z * dt;
       s.vel.y -= 4 * dt;
-      const g = groundHeightAt(s.pos.x, s.pos.z);
+      const g = this.gh(s.pos.x, s.pos.z);
       let dead = s.life <= 0 || s.pos.y < g;
       // hit player
       const d = new Vector3(s.pos.x - this.pos.x, s.pos.y - (this.pos.y + 1.2), s.pos.z - this.pos.z).length();

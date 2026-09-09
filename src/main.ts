@@ -35,6 +35,9 @@ game.init(bootError).then(() => {
     const valid = ["tololo", "qiongjiu", "mosin", "sabrina", "peritya", "vepley"];
     game.startRun((valid.includes(char) ? char : "tololo") as typeof char);
     if (q.get("god") === "1") game.sim.godmode = true;
+    // Isolated station review: Green Zone was never built in this mode, so the
+    // station loads over the review-only flat world (never both at once).
+    if (q.get("scene") === "tram-review") void game.enterTramReview();
   }
 }).catch((err) => {
   console.error(err);

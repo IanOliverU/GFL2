@@ -200,6 +200,7 @@ try {
     await page.evaluate((p) => {
       const g = window.__gflGame;
       g.sim.pos.set(10, 0, 10); g.sim.yaw = 0; g.sim.pitch = p;
+      g.sim.vel.set(0, 0, 0); g.sim.visualVel.set(0, 0, 0);
       g.sim.updateCamera(1, false);
       for (const t of g.sim.tracers) { t.active = false; t.mesh.isVisible = false; }
     }, pitch);

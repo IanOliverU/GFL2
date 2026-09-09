@@ -6,9 +6,14 @@ coverage/
 # Tololo art-slice: original PMX/textures are redistribution-restricted
 # (see docs/tololo-art-slice.md) and must never be committed.
 assets/
-# Local-only staged runtime copies + unapproved derived outputs.
+# Local-only staged runtime copies (dev-server middleware serves these from
+# outside public/ so `vite build` can never package them) + unapproved
+# derived outputs. public/mmd/ must stay absent: staging moved to
+# .local-assets/mmd/ (see scripts/stage-tololo.mjs + scripts/check-prod-assets.mjs).
+.local-assets/
 public/mmd/
 public/assets/glb/
+public/tram-review/
 *.pmx
 *.pmd
 *.vmd
