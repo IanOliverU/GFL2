@@ -61,6 +61,8 @@ interface Enemy {
   slowT: number; slowPct: number; stunT: number; markT: number; markMul: number;
   mesh: Mesh; bodyMat: StandardMaterial; baseEmissive: Color3; flashT: number;
   decideT: number; stuckT: number;
+  routeLane: number; routeNode: number; routeDir: -1 | 0 | 1;
+  routeBestD: number; routeStallT: number;
   // Ordinary-chaser articulated visual (null = legacy/other kinds).
   ch?: { joints: ChaserJoints; anim: ChaserAnim } | null;
   // boss state
@@ -188,6 +190,7 @@ export class Simulation {
 
   camPos = new Vector3(0, 3, 16);
   camTarget = new Vector3(0, 1.5, 10);
+  private cameraShoulder = 1;
   sensitivity = 1;
   reverseForward = false;
   reverseStrafe = true;
@@ -218,6 +221,26 @@ export class Simulation {
     return this.world.controllerGroundHeightAt
       ? this.world.controllerGroundHeightAt(x, z, currentY)
       : controllerGroundHeightAt(x, z, currentY);
+  }
+
+  private enemyNavRadius(e: Enemy): number {
+    return Math.min(e.radius, this.world.enemyNavRadiusCap ?? e.radius);
+  }
+
+  private cameraObstructionDistance(pivot: Vector3, rayDir: Vector3, rayLength: number): number {
+    let nearest = raycastSolid(pivot, rayDir, rayLength, this.world.colliders);
+    const imported = this.world.cameraObstruction;
+    if (!imported) return nearest;
+    nearest = Math.min(nearest, imported(pivot, rayDir, rayLength));
+    // Keep the lens clear of an arch edge even when the exact centre ray
+    // passes through a perforation. Two parallel rays approximate the
+    // camera's width while retaining the exact canopy BVH.
+    const lateral = new Vector3(-rayDir.z, 0, rayDir.x).normalize().scale(0.45);
+    return Math.min(
+      nearest,
+      imported(pivot.add(lateral), rayDir, rayLength),
+      imported(pivot.subtract(lateral), rayDir, rayLength),
+    );
   }
 
   startRun(charId: CharId, loop = 0, keepBuild?: PlayerBuild): void {
@@ -261,6 +284,7 @@ export class Simulation {
     this.spawnT = 2.5; this.spawnBudget = 0;
     this.camPos.set(4.9, 3.1, 17.5);
     this.camTarget.set(4, 1.9, 4);
+    this.cameraShoulder = 1;
     this.recolorPlayer();
   }
 
@@ -986,6 +1010,15 @@ export class Simulation {
         const dz = ax.x === 0 && ax.z === 0 ? basis.forwardZ * sign : move.z;
         const dashDistance = rank >= 5 ? 12 : rank >= 3 ? 10 : 8;
         moveHorizontalSafe(this.pos, dx * dashDistance, dz * dashDistance, 0.55, this.world.colliders, this.world.bounds);
+        // Horizontal teleports preserve Y, so tram-only uphill dashes can land
+        // inside solid grade. Downhill drops and Green Zone remain unchanged.
+        if (this.world.groundHeightAt) {
+          const dashGround = this.gh(this.pos.x, this.pos.z);
+          if (dashGround > this.pos.y && dashGround - this.pos.y <= 1.6) {
+            this.pos.y = dashGround;
+            this.vel.y = 0;
+          }
+        }
         this.iframes = Math.max(this.iframes, 0.3);
         this.empowerMagT = 999; this.empowerMul = 1 + 0.25 * pow;
         this.ammo = this.magSize();
@@ -1129,6 +1162,14 @@ export class Simulation {
       const blastDir = new Vector3(basis.forwardX, 0, basis.forwardZ);
       const slideDistance = rank >= 3 ? 8 : 6.6;
       moveHorizontalSafe(this.pos, dx * slideDistance, dz * slideDistance, 0.55, this.world.colliders, this.world.bounds);
+      // Same tram-only ledge-scale landing correction as Phase Step above.
+      if (this.world.groundHeightAt) {
+        const slideGround = this.gh(this.pos.x, this.pos.z);
+        if (slideGround > this.pos.y && slideGround - this.pos.y <= 1.6) {
+          this.pos.y = slideGround;
+          this.vel.y = 0;
+        }
+      }
       this.slideT = 0.5; this.iframes = Math.max(this.iframes, 0.3);
       const slideMuzzle = this.muzzlePos();
       for (const h of this.coneEnemies(slideMuzzle, blastDir, 10 + rank, 70)) {
@@ -1232,7 +1273,7 @@ export class Simulation {
     if (opts.knockback && e.kind !== "boss" && !e.kbResist) {
       const away = opts.from ? new Vector3(e.pos.x - opts.from.x, 0, e.pos.z - opts.from.z) : new Vector3(e.pos.x - this.pos.x, 0, e.pos.z - this.pos.z);
       const l = away.length() || 1;
-      moveHorizontalSafe(e.pos, (away.x / l) * opts.knockback * 0.35, (away.z / l) * opts.knockback * 0.35, e.radius, this.world.colliders, this.world.bounds);
+      moveHorizontalSafe(e.pos, (away.x / l) * opts.knockback * 0.35, (away.z / l) * opts.knockback * 0.35, this.enemyNavRadius(e), this.world.colliders, this.world.bounds);
     }
     if (opts.stun) e.stunT = Math.max(e.stunT, opts.stun * (e.kind === "boss" ? 0.35 : 1));
     if (e.hp <= 0) {
@@ -1434,6 +1475,7 @@ export class Simulation {
       attackT: 1 + this.gameplayRandom(), attackCd: 1.5, attackRange: 2.2,
       slowT: 0, slowPct: 0, stunT: 0, markT: 0, markMul: 1,
       mesh: root, bodyMat: mat, baseEmissive: (ch ? emis : elite ? new Color3(0.5, 0.35, 0.1) : emis).clone(), flashT: 0, decideT: this.gameplayRandom() * 0.3, stuckT: 0,
+      routeLane: -1, routeNode: -1, routeDir: 0, routeBestD: Infinity, routeStallT: 0,
       ch: ch ?? null,
       bossPhase: 0, abilityT: 4, abilityKind: 0, telegraphT: 0, Telegraph: null,
       kbResist: kind === "boss" || kind === "heavy",
@@ -1486,7 +1528,7 @@ export class Simulation {
         const d = new Vector3(f.pos.x - e.pos.x, 0, f.pos.z - e.pos.z).length();
         if (d < f.radius && !e.kbResist) {
           const pull = new Vector3(f.pos.x - e.pos.x, 0, f.pos.z - e.pos.z).normalize().scale((4 + f.power * 4) * dt);
-          moveHorizontalSafe(e.pos, pull.x, pull.z, e.radius, this.world.colliders, this.world.bounds);
+          moveHorizontalSafe(e.pos, pull.x, pull.z, this.enemyNavRadius(e), this.world.colliders, this.world.bounds);
           e.slowT = 0.3; e.slowPct = f.power;
         } else if (d < f.radius) { e.slowT = 0.3; e.slowPct = f.power * 0.55; }
       }
@@ -1581,12 +1623,13 @@ export class Simulation {
             const d = Math.sqrt(d2);
             const push = ((rr - d) / d) * 0.5 * 60 * dt * 0.016 * 60 * 0.016;
             void push;
-            moveHorizontalSafe(e.pos, (dx / d) * 2.2 * dt, (dz / d) * 2.2 * dt, e.radius, this.world.colliders, this.world.bounds);
+            moveHorizontalSafe(e.pos, (dx / d) * 2.2 * dt, (dz / d) * 2.2 * dt, this.enemyNavRadius(e), this.world.colliders, this.world.bounds);
           }
         }
       }
       // prevent indefinite unreachable accumulation: if far above/below player height for long, teleport nearer
-      resolveCircle(e.pos, e.radius, this.world.colliders);
+      const navRadius = this.enemyNavRadius(e);
+      resolveCircle(e.pos, navRadius, this.world.colliders);
       e.pos.x = Math.max(-this.world.bounds + e.radius, Math.min(this.world.bounds - e.radius, e.pos.x));
       e.pos.z = Math.max(-this.world.bounds + e.radius, Math.min(this.world.bounds - e.radius, e.pos.z));
       const gy = this.cgh(e.pos.x, e.pos.z, e.pos.y);
@@ -1604,8 +1647,64 @@ export class Simulation {
     let mz = dz / inputLength;
     let moveDistance = distance * Math.min(1, inputLength);
 
-    // Route between elevations through one of the two walkway ramps.
-    if (Math.abs(this.pos.y - e.pos.y) > 2.5) {
+    // A tram link is selected once and traversed in order. Stateless nearest-
+    // mouth steering oscillated at K1, while raw actor Y made apron jumps look
+    // like level changes; controller support heights avoid both failures.
+    const lanes = this.world.rampLanes;
+    let routeTarget: { x: number; z: number } | null = null;
+    if (lanes?.length) {
+      const playerSupport = this.cgh(this.pos.x, this.pos.z, this.pos.y);
+      const enemySupport = this.cgh(e.pos.x, e.pos.z, e.pos.y);
+      const playerOnDeck = playerSupport > 0.75;
+      if (e.routeDir !== 0 && playerOnDeck !== (e.routeDir > 0)) {
+        e.routeDir = 0;
+      }
+      if (e.routeDir === 0 && Math.abs(playerSupport - enemySupport) > 0.75) {
+        const dir: -1 | 1 = playerSupport > enemySupport ? 1 : -1;
+        let bestLane = 0;
+        let bestNode = dir > 0 ? 0 : lanes[0]!.points.length - 1;
+        let bestD = Infinity;
+        for (let laneIdx = 0; laneIdx < lanes.length; laneIdx++) {
+          const points = lanes[laneIdx]!.points;
+          const indices = dir > 0 ? points.map((_, i) => i) : points.map((_, i) => points.length - 1 - i);
+          for (const nodeIdx of indices) {
+            const p = points[nodeIdx]!;
+            const d = Math.hypot(e.pos.x - p.x, e.pos.z - p.z);
+            if (d < bestD) { bestD = d; bestLane = laneIdx; bestNode = nodeIdx; }
+            // Only skip staging nodes when already inside that lane corridor.
+            if (d < 2.2) break;
+            if ((dir > 0 && nodeIdx > 0) || (dir < 0 && nodeIdx < points.length - 1)) break;
+          }
+        }
+        e.routeLane = bestLane;
+        e.routeNode = bestNode;
+        e.routeDir = dir;
+        e.routeBestD = Infinity;
+        e.routeStallT = 0;
+      }
+      if (e.routeDir !== 0) {
+        const points = lanes[e.routeLane]!.points;
+        routeTarget = points[e.routeNode] ?? null;
+        while (routeTarget && Math.hypot(e.pos.x - routeTarget.x, e.pos.z - routeTarget.z) < 0.8) {
+          e.routeNode += e.routeDir;
+          e.routeBestD = Infinity;
+          e.routeStallT = 0;
+          routeTarget = points[e.routeNode] ?? null;
+        }
+        if (!routeTarget) {
+          e.routeDir = 0;
+          e.routeLane = -1;
+          e.routeNode = -1;
+          e.routeBestD = Infinity;
+          e.routeStallT = 0;
+        } else {
+          const rx = routeTarget.x - e.pos.x;
+          const rz = routeTarget.z - e.pos.z;
+          const rl = Math.hypot(rx, rz) || 1;
+          mx = rx / rl; mz = rz / rl;
+        }
+      }
+    } else if (Math.abs(this.pos.y - e.pos.y) > 2.5) {
       const leftDist = Math.hypot(e.pos.x + 45, e.pos.z + 30);
       const rightDist = Math.hypot(e.pos.x - 45, e.pos.z + 30);
       const rampX = leftDist < rightDist ? -45 : 45;
@@ -1618,7 +1717,8 @@ export class Simulation {
 
     // Cheap obstacle steering avoids direct-pressure deadlocks around buildings.
     const probe = new Vector3(e.pos.x, e.pos.y + 1, e.pos.z);
-    if (raycastSolid(probe, new Vector3(mx, 0, mz), e.radius + 1.2, this.world.colliders) < e.radius + 1.1) {
+    const navRadius = this.enemyNavRadius(e);
+    if (!routeTarget && raycastSolid(probe, new Vector3(mx, 0, mz), navRadius + 1.2, this.world.colliders) < navRadius + 1.1) {
       const side = e.id % 2 === 0 ? 1 : -1;
       const ox = mx;
       mx = -mz * side;
@@ -1627,21 +1727,47 @@ export class Simulation {
     }
 
     const sx = e.pos.x, sz = e.pos.z;
-    moveHorizontalSafe(e.pos, mx * moveDistance, mz * moveDistance, e.radius, this.world.colliders, this.world.bounds);
+    moveHorizontalSafe(e.pos, mx * moveDistance, mz * moveDistance, navRadius, this.world.colliders, this.world.bounds);
     const movedX = e.pos.x - sx, movedZ = e.pos.z - sz;
     const moved = Math.hypot(movedX, movedZ);
     if (e.ch) { e.ch.anim.moveX += movedX; e.ch.anim.moveZ += movedZ; }
     if (moved < moveDistance * 0.15) e.stuckT += STEP_SIZE;
     else e.stuckT = Math.max(0, e.stuckT - STEP_SIZE * 2);
+    if (routeTarget) {
+      const remaining = Math.hypot(e.pos.x - routeTarget.x, e.pos.z - routeTarget.z);
+      if (remaining < e.routeBestD - 0.05) {
+        e.routeBestD = remaining;
+        e.routeStallT = 0;
+      } else {
+        e.routeStallT += STEP_SIZE;
+        if (e.routeStallT > 4) e.stuckT = Math.max(e.stuckT, 3.6);
+      }
+    } else {
+      e.routeBestD = Infinity;
+      e.routeStallT = 0;
+    }
 
     if (e.stuckT > 3.5) {
       const candidates = this.world.spawnPoints.filter((p) => {
         const d = Math.hypot(p.x - this.pos.x, p.z - this.pos.z);
-        return d >= 14 && d <= 55 && isGroundSpawnValid(p, e.radius, this.world.colliders);
+        return d >= 14 && d <= 55 && isGroundSpawnValid(p, this.enemyNavRadius(e), this.world.colliders);
       });
-      const p = candidates[e.id % Math.max(1, candidates.length)];
+      // On staged worlds, prefer rescue points on the enemy's own level so a
+      // deck-separated enemy is not bounced across levels in a loop.
+      const lanes = this.world.rampLanes;
+      const pool = lanes && lanes.length > 0
+        ? (candidates.filter((p) => Math.abs(p.y - e.pos.y) < 1.0).length > 0
+          ? candidates.filter((p) => Math.abs(p.y - e.pos.y) < 1.0)
+          : candidates)
+        : candidates;
+      const p = pool[e.id % Math.max(1, pool.length)];
       if (p) e.pos.copyFrom(p);
       e.stuckT = 0;
+      e.routeDir = 0;
+      e.routeLane = -1;
+      e.routeNode = -1;
+      e.routeBestD = Infinity;
+      e.routeStallT = 0;
     }
   }
 
@@ -1965,43 +2091,54 @@ export class Simulation {
   }
 
   tryInteract(): void {
-    // relay
+    // Nearest wins between relay and caches: the circuit's spawn cache sits
+    // inside relay prompt range, and relay-first priority made F unreachable
+    // for it. Green Zone geometry never has both in range at once (caches sit
+    // ~39 m from its relay), so outcomes there are unchanged.
     const rd = new Vector3(this.pos.x - this.world.relayPos.x, 0, this.pos.z - this.world.relayPos.z).length();
-    if (rd < this.world.relayRadius + 2 && !this.relayActive) {
-      this.activateRelay();
-      return;
-    }
-    // caches
-    for (const c of this.world.caches) {
+    let cache: { d: number; idx: number } | null = null;
+    for (let idx = 0; idx < this.world.caches.length; idx++) {
+      const c = this.world.caches[idx]!;
       if (c.taken) continue;
       const d = new Vector3(this.pos.x - c.pos.x, 0, this.pos.z - c.pos.z).length();
-      if (d < 3) {
-        c.taken = true;
-        c.mesh.isVisible = false;
-        if (c.glow) c.glow.isVisible = false;
-        this.cachesOpened++;
-        // cache attachment: luck scales with caches opened
-        const luck = Math.min(2.5, 0.4 + this.cachesOpened * 0.25 + this.loop);
-        const rarity = this.rollRarityLocal(luck);
-        const slots = slotsFor(this.build.charId);
-        const slot = slots[Math.floor(this.gameplayRandom() * slots.length)]!;
-        const def = this.rollAttachmentLocal(slot, rarity);
-        synth.levelup();
-        this.interrupted = true;
-        this.events.pickupAttachment(def);
-        return;
-      }
+      // Match nearestInteractable so the visible prompt and F action cannot
+      // disagree in the relay/cache overlap band.
+      if (d < 3.2 && (!cache || d < cache.d)) cache = { d, idx };
+    }
+    if (cache && (this.relayActive || rd >= this.world.relayRadius + 2 || cache.d < rd)) {
+      const c = this.world.caches[cache.idx]!;
+      c.taken = true;
+      c.mesh.isVisible = false;
+      if (c.glow) c.glow.isVisible = false;
+      this.cachesOpened++;
+      // cache attachment: luck scales with caches opened
+      const luck = Math.min(2.5, 0.4 + this.cachesOpened * 0.25 + this.loop);
+      const rarity = this.rollRarityLocal(luck);
+      const slots = slotsFor(this.build.charId);
+      const slot = slots[Math.floor(this.gameplayRandom() * slots.length)]!;
+      const def = this.rollAttachmentLocal(slot, rarity);
+      synth.levelup();
+      this.interrupted = true;
+      this.events.pickupAttachment(def);
+      return;
+    }
+    if (rd < this.world.relayRadius + 2 && !this.relayActive) {
+      this.activateRelay();
     }
   }
 
   nearestInteractable(): string | null {
     const rd = new Vector3(this.pos.x - this.world.relayPos.x, 0, this.pos.z - this.world.relayPos.z).length();
-    if (rd < this.world.relayRadius + 2 && !this.relayActive) return "Activate Relay";
+    let cacheD = Infinity;
     for (const c of this.world.caches) {
       if (c.taken) continue;
       const d = new Vector3(this.pos.x - c.pos.x, 0, this.pos.z - c.pos.z).length();
-      if (d < 3.2) return "Open Cache";
+      if (d < 3.2) cacheD = Math.min(cacheD, d);
     }
+    const relayInRange = rd < this.world.relayRadius + 2 && !this.relayActive;
+    // Same nearest-wins rule as tryInteract so the prompt never lies.
+    if (cacheD < Infinity && (!relayInRange || cacheD < rd)) return "Open Cache";
+    if (relayInRange) return "Activate Relay";
     return null;
   }
 
@@ -2052,15 +2189,43 @@ export class Simulation {
     const back = dir.scale(-dist);
     // shoulder offset
     const right = new Vector3(-dir.z, 0, dir.x).normalize().scale(0.9);
-    let desired = pivot.add(back).add(right);
+    const shoulder = right.scale(this.cameraShoulder);
+    let desired = pivot.add(back).add(shoulder);
     desired.y += 0.4;
     // camera collision: ray from pivot toward desired
-    const cd = desired.subtract(pivot);
-    const len = cd.length();
+    let cd = desired.subtract(pivot);
+    let len = cd.length();
     if (len > 0.001) {
-      const n = cd.scale(1 / len);
-      const hit = raycastSolid(pivot, n, len, this.world.colliders);
-      if (hit < len) desired = pivot.add(n.scale(Math.max(0.6, hit - 0.35)));
+      let n = cd.scale(1 / len);
+      let hit = this.cameraObstructionDistance(pivot, n, len);
+      // Imported tram arches have alternating open shoulders. Keep the current
+      // shoulder until it is genuinely obstructed, then switch only for a
+      // substantial clearance gain; this avoids per-rib left/right flicker.
+      if (this.world.cameraObstruction && hit < len) {
+        const alternate = pivot.add(back).subtract(shoulder);
+        alternate.y += 0.4;
+        const altCd = alternate.subtract(pivot);
+        const altLen = altCd.length();
+        const altN = altCd.scale(1 / altLen);
+        const altHit = this.cameraObstructionDistance(pivot, altN, altLen);
+        if (altHit > hit + 0.65) {
+          this.cameraShoulder *= -1;
+          desired = alternate;
+          cd = altCd;
+          len = altLen;
+          n = altN;
+          hit = altHit;
+        }
+      }
+      if (hit < len) {
+        // Imported tram geometry may sit within the old 0.6 m minimum. Keep
+        // Green Zone's authored clamp and use the near-wall squeeze only for
+        // the review station, where crossing the wall would move the aim ray.
+        const clearance = this.world.cameraObstruction
+          ? (hit > 0.45 ? hit - 0.35 : Math.max(0.05, hit - 0.05))
+          : Math.max(0.6, hit - 0.35);
+        desired = pivot.add(n.scale(clearance));
+      }
     }
     const k = 1 - Math.pow(0.0001, rdt);
     Vector3.LerpToRef(this.camPos, desired, Math.min(1, k), this.camPos);

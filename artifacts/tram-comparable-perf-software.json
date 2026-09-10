@@ -1,0 +1,166 @@
+{
+  "status": "comparable measurement, not an asset suitability verdict",
+  "conditions": "headless Chrome 1280x720, forced WebGL2, software, zero enemies/caches, Tololo PMX, relay+3m gameplay camera, 4s equal warm-up",
+  "gpuMode": "software",
+  "sampleMs": 5000,
+  "order": [
+    "tram",
+    "gz",
+    "gz",
+    "tram"
+  ],
+  "baseRevision": "6399d77",
+  "sourceHashes": {
+    "tramReview": "38ad9bed373863b4",
+    "greenZone": "8770cb465e68d261",
+    "game": "eb0e50bd6803f2dd",
+    "sim": "ee04eefa3e8cda92"
+  },
+  "aggregate": {
+    "tram": {
+      "samples": 2,
+      "fps": 3.3773438691311655,
+      "frameMsAvg": 306.78437499999995,
+      "frameMsP95": 324.2999999999993,
+      "activeMeshes": 344,
+      "activeIndices": 612690,
+      "totalMeshes": 1121,
+      "drawCallsPerFrame": 341
+    },
+    "greenZone": {
+      "samples": 2,
+      "fps": 9.762627925451905,
+      "frameMsAvg": 103.09062499999999,
+      "frameMsP95": 109.10000000000036,
+      "activeMeshes": 75,
+      "activeIndices": 195552,
+      "totalMeshes": 380,
+      "drawCallsPerFrame": 91
+    },
+    "ratios": {
+      "drawCalls": 3.7472527472527473,
+      "activeMeshes": 4.586666666666667,
+      "activeIndices": 3.1331308296514484,
+      "frameMs": 2.975870744793719
+    }
+  },
+  "runs": [
+    {
+      "scene": "tram",
+      "run": 1,
+      "setup": {
+        "player": {
+          "x": 16,
+          "y": 0,
+          "z": 58,
+          "yaw": 0
+        },
+        "relay": {
+          "x": 16,
+          "y": 0,
+          "z": 55
+        },
+        "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+      },
+      "measurement": {
+        "label": "tram relay-relative idle run 1",
+        "frames": 18,
+        "fps": 3.4130987143994846,
+        "frameMsAvg": 304.0999999999999,
+        "frameMsP95": 315.1999999999989,
+        "activeMeshes": 344,
+        "activeIndices": 612690,
+        "totalMeshes": 1121,
+        "drawCallsPerFrame": 341
+      }
+    },
+    {
+      "scene": "gz",
+      "run": 1,
+      "setup": {
+        "player": {
+          "x": 0,
+          "y": 0,
+          "z": -5,
+          "yaw": 0
+        },
+        "relay": {
+          "x": 0,
+          "y": 0,
+          "z": -8
+        },
+        "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+      },
+      "measurement": {
+        "label": "gz relay-relative idle run 1",
+        "frames": 49,
+        "fps": 9.749109647639685,
+        "frameMsAvg": 103.53333333333332,
+        "frameMsP95": 109.10000000000036,
+        "activeMeshes": 75,
+        "activeIndices": 195552,
+        "totalMeshes": 380,
+        "drawCallsPerFrame": 91
+      }
+    },
+    {
+      "scene": "gz",
+      "run": 2,
+      "setup": {
+        "player": {
+          "x": 0,
+          "y": 0,
+          "z": -5,
+          "yaw": 0
+        },
+        "relay": {
+          "x": 0,
+          "y": 0,
+          "z": -8
+        },
+        "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+      },
+      "measurement": {
+        "label": "gz relay-relative idle run 2",
+        "frames": 49,
+        "fps": 9.776146203264126,
+        "frameMsAvg": 102.64791666666667,
+        "frameMsP95": 109.10000000000036,
+        "activeMeshes": 75,
+        "activeIndices": 195552,
+        "totalMeshes": 380,
+        "drawCallsPerFrame": 91
+      }
+    },
+    {
+      "scene": "tram",
+      "run": 2,
+      "setup": {
+        "player": {
+          "x": 16,
+          "y": 0,
+          "z": 58,
+          "yaw": 0
+        },
+        "relay": {
+          "x": 16,
+          "y": 0,
+          "z": 55
+        },
+        "renderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)"
+      },
+      "measurement": {
+        "label": "tram relay-relative idle run 2",
+        "frames": 17,
+        "fps": 3.3415890238628463,
+        "frameMsAvg": 309.46875,
+        "frameMsP95": 333.39999999999964,
+        "activeMeshes": 344,
+        "activeIndices": 612690,
+        "totalMeshes": 1121,
+        "drawCallsPerFrame": 341
+      }
+    }
+  ],
+  "errors": []
+}

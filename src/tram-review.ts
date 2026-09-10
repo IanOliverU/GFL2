@@ -6,9 +6,10 @@
 // https://sketchfab.com/3d-models/tram-station-5079604f87084b2db1748193816942b9
 // (Sketchfab export, embedded metadata verified; page-side terms not fetched).
 // Modifications here are runtime-only (root offset, review-world props,
-// measurement helpers) — the GLB bytes are never altered, and nothing under
-// this module may enter a commit, build, or publication without the owner's
-// explicit suitability verdict plus visible CC-BY attribution.
+// measurement helpers). The owner approved this source-only review slice for
+// repository publication on 2026-09-10; the GLB bytes remain local-only and
+// still require a suitability verdict plus visible CC-BY attribution before
+// any shipped redistribution.
 //
 // The GLB is served in `vite dev` only by middleware in vite.config.ts (no
 // public/ copy, never imported, never bundled). Normal gameplay always builds
@@ -79,11 +80,16 @@ export const TRAM_RAMPS = [
 export const TRAM_APRON = { x0: 0, x1: 26, z0: 42, z1: 64 };
 export const TRAM_RELAY_POS = new Vector3(16, 0, 55);
 export const TRAM_RELAY_RADIUS = 5;
-/** Safe spawn: SW apron pad with a walk-up view of relay, kiosks, ramps. */
-export const TRAM_SPAWN_POS = new Vector3(14, 0, 61);
+/** Safe spawn: west apron approach, looking through the kiosk passage to ramp A. */
+export const TRAM_SPAWN_POS = new Vector3(5, 0, 53.5);
 export const TRAM_SPAWN_YAW = 0;
 /** In-circuit boss arrival (east apron, clear of kiosks/ring/fences). */
 export const TRAM_BOSS_SPAWN = new Vector3(24, 0, 58);
+/** Ordered apron-to-deck links. B stages east of K1 before entering its slot. */
+export const TRAM_RAMP_LANES = [
+  { points: [{ x: 5, z: 43.4 }, { x: 5, z: 40 }, { x: 5, z: 36 }] },
+  { points: [{ x: 13, z: 43.4 }, { x: 8, z: 43.4 }, { x: 8, z: 40 }, { x: 8, z: 36 }] },
+];
 
 /** Stage ground height: platform deck, ramp lerps, else apron grade. */
 export function tramGroundHeightAt(x: number, z: number): number {
@@ -130,18 +136,244 @@ export interface TramReviewStats {
   approxTriangles: number;
   disabledCameras: number;
   disabledLights: number;
+  cameraTriangles: number;
+  cameraBvhNodes: number;
   boundsMin: Vector3;
   boundsMax: Vector3;
+}
+
+interface TramCameraBvh {
+  triangleCount: number;
+  nodeCount: number;
+  intersect(origin: Vector3, direction: Vector3, maxDist: number): number;
 }
 
 export interface TramReviewLoad {
   root: TransformNode;
   meshes: AbstractMesh[];
+  cameras: Camera[];
+  lights: Light[];
+  cameraMesh: Mesh | null;
+  cameraBvh: TramCameraBvh | null;
   materials: Material[];
   textures: BaseTexture[];
   aux: Mesh[];
   stats: TramReviewStats;
   timings: TramReviewTimings;
+}
+
+function tramRayBoxEntry(
+  bounds: Float32Array, node: number,
+  ox: number, oy: number, oz: number, dx: number, dy: number, dz: number,
+  nearest: number,
+): number {
+  const bi = node * 6;
+  let near = 0;
+  let far = nearest;
+  if (Math.abs(dx) < 1e-12) {
+    if (ox < bounds[bi]! || ox > bounds[bi + 3]!) return Infinity;
+  } else {
+    let a = (bounds[bi]! - ox) / dx;
+    let b = (bounds[bi + 3]! - ox) / dx;
+    if (a > b) { const swap = a; a = b; b = swap; }
+    near = Math.max(near, a);
+    far = Math.min(far, b);
+    if (near > far) return Infinity;
+  }
+  if (Math.abs(dy) < 1e-12) {
+    if (oy < bounds[bi + 1]! || oy > bounds[bi + 4]!) return Infinity;
+  } else {
+    let a = (bounds[bi + 1]! - oy) / dy;
+    let b = (bounds[bi + 4]! - oy) / dy;
+    if (a > b) { const swap = a; a = b; b = swap; }
+    near = Math.max(near, a);
+    far = Math.min(far, b);
+    if (near > far) return Infinity;
+  }
+  if (Math.abs(dz) < 1e-12) {
+    if (oz < bounds[bi + 2]! || oz > bounds[bi + 5]!) return Infinity;
+  } else {
+    let a = (bounds[bi + 2]! - oz) / dz;
+    let b = (bounds[bi + 5]! - oz) / dz;
+    if (a > b) { const swap = a; a = b; b = swap; }
+    near = Math.max(near, a);
+    far = Math.min(far, b);
+    if (near > far) return Infinity;
+  }
+  return near;
+}
+
+/** Build an exact, allocation-free query accelerator for the perforated canopy. */
+function buildTramCameraBvh(mesh: Mesh): TramCameraBvh {
+  mesh.computeWorldMatrix(true);
+  const sourcePositions = mesh.getVerticesData("position");
+  const sourceIndices = mesh.getIndices();
+  if (!sourcePositions || !sourceIndices || sourceIndices.length < 3) {
+    throw new Error("tram canopy has no indexed position geometry");
+  }
+  const positions = Float32Array.from(sourcePositions);
+  const indices = Uint32Array.from(sourceIndices);
+  const triangleCount = Math.floor(indices.length / 3);
+  const triangleBounds = new Float32Array(triangleCount * 6);
+  const triangleCentres = new Float32Array(triangleCount * 3);
+  const order = Array.from({ length: triangleCount }, (_, i) => i);
+  for (let triangle = 0; triangle < triangleCount; triangle++) {
+    const ti = triangle * 3;
+    const a = indices[ti]! * 3;
+    const b = indices[ti + 1]! * 3;
+    const c = indices[ti + 2]! * 3;
+    const minX = Math.min(positions[a]!, positions[b]!, positions[c]!);
+    const minY = Math.min(positions[a + 1]!, positions[b + 1]!, positions[c + 1]!);
+    const minZ = Math.min(positions[a + 2]!, positions[b + 2]!, positions[c + 2]!);
+    const maxX = Math.max(positions[a]!, positions[b]!, positions[c]!);
+    const maxY = Math.max(positions[a + 1]!, positions[b + 1]!, positions[c + 1]!);
+    const maxZ = Math.max(positions[a + 2]!, positions[b + 2]!, positions[c + 2]!);
+    const bi = triangle * 6;
+    // Babylon accepts barycentric coordinates 0.001 beyond triangle edges.
+    // Inflate leaf bounds enough that broadphase cannot reject such an edge hit.
+    triangleBounds[bi] = minX - (maxX - minX) * 0.002 - 1e-6;
+    triangleBounds[bi + 1] = minY - (maxY - minY) * 0.002 - 1e-6;
+    triangleBounds[bi + 2] = minZ - (maxZ - minZ) * 0.002 - 1e-6;
+    triangleBounds[bi + 3] = maxX + (maxX - minX) * 0.002 + 1e-6;
+    triangleBounds[bi + 4] = maxY + (maxY - minY) * 0.002 + 1e-6;
+    triangleBounds[bi + 5] = maxZ + (maxZ - minZ) * 0.002 + 1e-6;
+    const ci = triangle * 3;
+    triangleCentres[ci] = (minX + maxX) * 0.5;
+    triangleCentres[ci + 1] = (minY + maxY) * 0.5;
+    triangleCentres[ci + 2] = (minZ + maxZ) * 0.5;
+  }
+
+  const nodeBounds: number[] = [];
+  const nodeMeta: number[] = [];
+  const buildNode = (start: number, end: number): number => {
+    const node = nodeMeta.length / 4;
+    nodeMeta.push(-1, -1, start, end - start);
+    const boundsAt = nodeBounds.length;
+    nodeBounds.push(Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity);
+    let centreMinX = Infinity;
+    let centreMinY = Infinity;
+    let centreMinZ = Infinity;
+    let centreMaxX = -Infinity;
+    let centreMaxY = -Infinity;
+    let centreMaxZ = -Infinity;
+    for (let i = start; i < end; i++) {
+      const triangle = order[i]!;
+      const bi = triangle * 6;
+      nodeBounds[boundsAt] = Math.min(nodeBounds[boundsAt]!, triangleBounds[bi]!);
+      nodeBounds[boundsAt + 1] = Math.min(nodeBounds[boundsAt + 1]!, triangleBounds[bi + 1]!);
+      nodeBounds[boundsAt + 2] = Math.min(nodeBounds[boundsAt + 2]!, triangleBounds[bi + 2]!);
+      nodeBounds[boundsAt + 3] = Math.max(nodeBounds[boundsAt + 3]!, triangleBounds[bi + 3]!);
+      nodeBounds[boundsAt + 4] = Math.max(nodeBounds[boundsAt + 4]!, triangleBounds[bi + 4]!);
+      nodeBounds[boundsAt + 5] = Math.max(nodeBounds[boundsAt + 5]!, triangleBounds[bi + 5]!);
+      const ci = triangle * 3;
+      centreMinX = Math.min(centreMinX, triangleCentres[ci]!);
+      centreMinY = Math.min(centreMinY, triangleCentres[ci + 1]!);
+      centreMinZ = Math.min(centreMinZ, triangleCentres[ci + 2]!);
+      centreMaxX = Math.max(centreMaxX, triangleCentres[ci]!);
+      centreMaxY = Math.max(centreMaxY, triangleCentres[ci + 1]!);
+      centreMaxZ = Math.max(centreMaxZ, triangleCentres[ci + 2]!);
+    }
+    if (end - start <= 8) return node;
+    const spans = [centreMaxX - centreMinX, centreMaxY - centreMinY, centreMaxZ - centreMinZ];
+    const axis = spans[1]! > spans[0]! ? (spans[2]! > spans[1]! ? 2 : 1) : (spans[2]! > spans[0]! ? 2 : 0);
+    const sorted = order.slice(start, end).sort((a, b) => triangleCentres[a * 3 + axis]! - triangleCentres[b * 3 + axis]!);
+    for (let i = 0; i < sorted.length; i++) order[start + i] = sorted[i]!;
+    const middle = start + Math.floor((end - start) / 2);
+    const left = buildNode(start, middle);
+    const right = buildNode(middle, end);
+    const mi = node * 4;
+    nodeMeta[mi] = left;
+    nodeMeta[mi + 1] = right;
+    nodeMeta[mi + 2] = 0;
+    nodeMeta[mi + 3] = 0;
+    return node;
+  };
+  buildNode(0, triangleCount);
+
+  const packedOrder = Uint16Array.from(order);
+  const packedBounds = Float32Array.from(nodeBounds);
+  const packedMeta = Int32Array.from(nodeMeta);
+  const inverseWorld = Float32Array.from(mesh.getWorldMatrix().clone().invert().m);
+  const stack = new Int32Array(64);
+
+  const intersect = (origin: Vector3, direction: Vector3, maxDist: number): number => {
+    const m = inverseWorld;
+    const rw = origin.x * m[3]! + origin.y * m[7]! + origin.z * m[11]! + m[15]!;
+    const ox = (origin.x * m[0]! + origin.y * m[4]! + origin.z * m[8]! + m[12]!) / rw;
+    const oy = (origin.x * m[1]! + origin.y * m[5]! + origin.z * m[9]! + m[13]!) / rw;
+    const oz = (origin.x * m[2]! + origin.y * m[6]! + origin.z * m[10]! + m[14]!) / rw;
+    const rawDx = direction.x * m[0]! + direction.y * m[4]! + direction.z * m[8]!;
+    const rawDy = direction.x * m[1]! + direction.y * m[5]! + direction.z * m[9]!;
+    const rawDz = direction.x * m[2]! + direction.y * m[6]! + direction.z * m[10]!;
+    const localScale = Math.hypot(rawDx, rawDy, rawDz);
+    if (localScale < 1e-12 || maxDist <= 0) return Infinity;
+    const dx = rawDx / localScale;
+    const dy = rawDy / localScale;
+    const dz = rawDz / localScale;
+    let nearest = maxDist * localScale;
+
+    let stackSize = 0;
+    stack[stackSize++] = 0;
+    while (stackSize > 0) {
+      const node = stack[--stackSize]!;
+      if (tramRayBoxEntry(packedBounds, node, ox, oy, oz, dx, dy, dz, nearest) === Infinity) continue;
+      const mi = node * 4;
+      const left = packedMeta[mi]!;
+      if (left >= 0) {
+        const right = packedMeta[mi + 1]!;
+        const leftEntry = tramRayBoxEntry(packedBounds, left, ox, oy, oz, dx, dy, dz, nearest);
+        const rightEntry = tramRayBoxEntry(packedBounds, right, ox, oy, oz, dx, dy, dz, nearest);
+        if (leftEntry === Infinity && rightEntry === Infinity) continue;
+        if (leftEntry <= rightEntry) {
+          if (rightEntry !== Infinity) stack[stackSize++] = right;
+          if (leftEntry !== Infinity) stack[stackSize++] = left;
+        } else {
+          if (leftEntry !== Infinity) stack[stackSize++] = left;
+          if (rightEntry !== Infinity) stack[stackSize++] = right;
+        }
+        continue;
+      }
+      const start = packedMeta[mi + 2]!;
+      const end = start + packedMeta[mi + 3]!;
+      for (let i = start; i < end; i++) {
+        const triangle = packedOrder[i]!;
+        const ti = triangle * 3;
+        const ai = indices[ti]! * 3;
+        const bi = indices[ti + 1]! * 3;
+        const ci = indices[ti + 2]! * 3;
+        const ax = positions[ai]!;
+        const ay = positions[ai + 1]!;
+        const az = positions[ai + 2]!;
+        const e1x = positions[bi]! - ax;
+        const e1y = positions[bi + 1]! - ay;
+        const e1z = positions[bi + 2]! - az;
+        const e2x = positions[ci]! - ax;
+        const e2y = positions[ci + 1]! - ay;
+        const e2z = positions[ci + 2]! - az;
+        const px = dy * e2z - dz * e2y;
+        const py = dz * e2x - dx * e2z;
+        const pz = dx * e2y - dy * e2x;
+        const determinant = e1x * px + e1y * py + e1z * pz;
+        if (determinant === 0) continue;
+        const inverseDeterminant = 1 / determinant;
+        const tx = ox - ax;
+        const ty = oy - ay;
+        const tz = oz - az;
+        const u = (tx * px + ty * py + tz * pz) * inverseDeterminant;
+        if (u < -0.001 || u > 1.001) continue;
+        const qx = ty * e1z - tz * e1y;
+        const qy = tz * e1x - tx * e1z;
+        const qz = tx * e1y - ty * e1x;
+        const v = (dx * qx + dy * qy + dz * qz) * inverseDeterminant;
+        if (v < -0.001 || u + v > 1.001) continue;
+        const distance = (e2x * qx + e2y * qy + e2z * qz) * inverseDeterminant;
+        if (distance >= 0 && distance <= nearest) nearest = distance;
+      }
+    }
+    return nearest < maxDist * localScale ? nearest / localScale : Infinity;
+  };
+
+  return { triangleCount, nodeCount: packedMeta.length / 4, intersect };
 }
 
 function reviewMat(scene: Scene, name: string, c: Color3, e?: Color3): StandardMaterial {
@@ -204,11 +436,10 @@ function buildTramSky(scene: Scene): void {
  * - two step-ramps (x 4…6 and 7…9, z 39.3…42) as the only deck connections;
  * - tight invisible AABBs on the visible kiosk walls (cover that preserves
  *   the west kiosk passage);
- * - 2.4 m station-fence perimeter (concrete base + dark steel) closing every
- *   other side so jump (1.3 m), dodge slides, and 8–12 m Phase Steps cannot
- *   leave for unsupported scenery (all three move via sub-stepped
- *   moveHorizontalSafe + vertical-span resolveCircle, which a 2.4 m wall
- *   holds against).
+ * - Open station railings close every unsupported edge: 1.7 m above grade and
+ *   1.65 m above the platform deck. Low curbs, two horizontal bars, and posts
+ *   each have matching collision, so views/shots pass through visible gaps
+ *   while jump, dodge, and Phase Step body spans remain contained.
  * The full district composition stays loaded and untouched (scenery-only
  * outside the circuit); the Green Zone fallback is a separate branch.
  */
@@ -234,8 +465,12 @@ export function buildTramReviewWorld(scene: Scene): WorldRefs {
 
   // Station-coherent materials (concrete, dark steel, platform paver red,
   // bench timber). No teal/orange proxy emissives remain.
-  const concreteMat = reviewMat(scene, "tramReviewConcreteM", new Color3(0.52, 0.53, 0.55));
-  const steelMat = reviewMat(scene, "tramReviewSteelM", new Color3(0.16, 0.18, 0.22));
+  // Daylight readability: every solid carries a small emissive floor so shaded
+  // faces render as material color, never pure black (footage showed the dark
+  // steel fence photographing as black voids in close-up).
+  const concreteMat = reviewMat(scene, "tramReviewConcreteM", new Color3(0.60, 0.62, 0.65), new Color3(0.07, 0.07, 0.08));
+  const curbMat = reviewMat(scene, "tramReviewCurbM", new Color3(0.38, 0.40, 0.40), new Color3(0.035, 0.035, 0.035));
+  const steelMat = reviewMat(scene, "tramReviewSteelM", new Color3(0.16, 0.28, 0.37), new Color3(0.025, 0.04, 0.055));
   const paverMat = reviewMat(scene, "tramReviewPaverM", new Color3(0.55, 0.32, 0.28));
   const timberMat = reviewMat(scene, "tramReviewTimberM", new Color3(0.45, 0.33, 0.2));
 
@@ -285,14 +520,17 @@ export function buildTramReviewWorld(scene: Scene): WorldRefs {
     }
     addBox(cx, gy + 0.27, cz, 1.8, 0.55, 0.6);
   };
-  bench("tram-review-bench-0", 4.6, 28);
-  bench("tram-review-bench-1", 8.2, 23);
+  bench("tram-review-bench-0", 5.8, 28);
+  bench("tram-review-bench-1", 7.0, 23);
 
-  // Kiosk walls as tight invisible cover (measured mesh bounds, §14):
-  // K1 south (Object_1296) + K2 mid (Object_1298) + K3 east (Object_342).
-  // The west gap (x<7) stays the open kiosk passage to ramp A.
-  addBox(8.37, 1.37, 48.94, 2.61, 2.74, 10.08); // K1
-  addBox(9.04, 1.37, 58.99, 2.61, 2.74, 10.08); // K2
+  // Kiosk walls as tight invisible cover (ray-measured solid faces, §14/§15):
+  // K1 Object_1296 (x 7.06…9.67 envelope over 7.28…9.45 of pilasters/bays,
+  // NORTH wall ~44.6–45.7, not the 43.9 mesh-bounds skirt), K2 Object_1298
+  // (x 7.73…10.35 over 7.97…10.12, south face flush with the fence line at
+  // 63.8), K3 east Object_342 (bounds). The west gap (x<7) stays the kiosk
+  // passage; the deeper slot (z 42…44.6) feeds ramp B's mouth.
+  addBox(8.37, 1.37, 49.25, 2.61, 2.74, 9.3); // K1 (z 44.6…53.9)
+  addBox(9.04, 1.37, 58.875, 2.61, 2.74, 9.85); // K2 (z 53.9…63.8)
   addBox(22.0, 1.82, 44.1, 3.8, 3.65, 6.6); // K3 east
 
   // Apron cover: two concrete blocks flanking the relay approaches.
@@ -307,33 +545,72 @@ export function buildTramReviewWorld(scene: Scene): WorldRefs {
     addBox(cx, 1.0, cz, 2.2, 2.0, 2.2);
   };
   coverBlock("tram-review-cover-0", 22, 52);
-  coverBlock("tram-review-cover-1", 5, 60);
+  coverBlock("tram-review-cover-1", 19, 61);
 
-  // 2.4 m station-fence perimeter (concrete base + dark steel above): every
-  // circuit side is closed except the two ramp mouths. Tall enough that the
-  // 1.3 m jump, dodge slides, and sub-stepped Phase Steps cannot strand
-  // players in the unvalidated district beyond.
-  const fence = (name: string, cx: number, cz: number, sx: number, sz: number): void => {
-    const base = MeshBuilder.CreateBox(`${name}-base`, { width: sx, height: 0.5, depth: sz }, scene);
-    base.position = new Vector3(cx, 0.25, cz);
-    base.material = concreteMat;
-    const topH = 1.9;
-    const top = MeshBuilder.CreateBox(name, { width: Math.max(0.25, sx - 0.1), height: topH, depth: Math.max(0.25, sz - 0.1) }, scene);
-    top.position = new Vector3(cx, 0.5 + topH / 2, cz);
-    top.material = steelMat;
-    addBox(cx, 1.2, cz, sx, 2.4, sz);
+  // Open station railing: a low curb, two narrow horizontal bars, and posts.
+  // Each visible member gets the same AABB used by movement, camera, and shot
+  // queries, so the openings really are open while the continuous rails still
+  // catch jump, dodge, and Phase Step body spans. Platform rails start on the
+  // deck and rise just above the deck-jump body span; they do not form walls.
+  const fence = (
+    name: string, cx: number, cz: number, sx: number, sz: number,
+    h = 1.7, baseY = 0,
+  ): void => {
+    const horizontal = sx >= sz;
+    const curbH = 0.22;
+    const base = MeshBuilder.CreateBox(`${name}-base`, { width: sx, height: curbH, depth: sz }, scene);
+    base.position = new Vector3(cx, baseY + curbH / 2, cz);
+    base.material = curbMat;
+    addBox(cx, baseY + curbH / 2, cz, sx, curbH, sz);
+
+    const steelParts: Mesh[] = [];
+    const railThickness = 0.12;
+    for (const [i, y] of [baseY + 0.82, baseY + h - 0.08].entries()) {
+      const rail = MeshBuilder.CreateBox(`${name}-rail-${i}`, {
+        width: horizontal ? sx : 0.14,
+        height: railThickness,
+        depth: horizontal ? 0.14 : sz,
+      }, scene);
+      rail.position = new Vector3(cx, y, cz);
+      rail.material = steelMat;
+      steelParts.push(rail);
+      addBox(cx, y, cz, horizontal ? sx : 0.14, railThickness, horizontal ? 0.14 : sz);
+    }
+
+    const length = horizontal ? sx : sz;
+    const postCount = Math.max(2, Math.ceil(length / 2.6) + 1);
+    const postH = h - curbH;
+    for (let i = 0; i < postCount; i++) {
+      const along = -length / 2 + length * i / (postCount - 1);
+      const px = horizontal ? cx + along : cx;
+      const pz = horizontal ? cz : cz + along;
+      const post = MeshBuilder.CreateBox(`${name}-post-${i}`, { width: 0.14, height: postH, depth: 0.14 }, scene);
+      post.position = new Vector3(px, baseY + curbH + postH / 2, pz);
+      post.material = steelMat;
+      steelParts.push(post);
+      addBox(px, baseY + curbH + postH / 2, pz, 0.14, postH, 0.14);
+    }
+    const steel = Mesh.MergeMeshes(steelParts, true, true, undefined, false, true);
+    if (steel) {
+      steel.name = name;
+      steel.material = steelMat;
+    }
   };
-  // Apron north fence (z=42) with ramp-mouth openings at x 4…6 and 7…9.
+  // Apron north fence (z=42) with ramp-mouth openings at x 4…6 and 7…10.
+  // Mouth B runs 1 m wider than its ramp slab so eastern approaches can round
+  // the fence jamb without oscillating against the corner (the shoulder is
+  // flat grade leading into the same slot).
   fence("tram-review-fence-n0", 2, 42, 4, 0.4);
   fence("tram-review-fence-n1", 6.5, 42, 1, 0.4);
-  fence("tram-review-fence-n2", 17.5, 42, 17, 0.4);
+  fence("tram-review-fence-n2", 18, 42, 16, 0.4);
   fence("tram-review-fence-s", 13, 64, 26, 0.4); // south
   fence("tram-review-fence-w", 0, 53, 0.4, 22); // west
   fence("tram-review-fence-e", 26, 53, 0.4, 22); // east
-  // Platform west/east/north fences ride the slab edges (base y0, top 2.4).
-  fence("tram-review-fence-pw", 3.4, 30, 0.4, 24);
-  fence("tram-review-fence-pe", 9.8, 30, 0.4, 24);
-  fence("tram-review-fence-pn", 6.6, 18, 6.8, 0.4);
+  // Platform railings sit on the deck and reach world y=3.1, enough to catch
+  // a jumping body while leaving sightlines through and over the bars.
+  fence("tram-review-fence-pw", 3.4, 30, 0.4, 24, 1.65, TRAM_PLATFORM_TOP);
+  fence("tram-review-fence-pe", 9.8, 30, 0.4, 24, 1.65, TRAM_PLATFORM_TOP);
+  fence("tram-review-fence-pn", 6.6, 18, 6.8, 0.4, 1.65, TRAM_PLATFORM_TOP);
   // Corner closers: west strip x0…3.4 and east pocket x9.8…26 at z≈40.6.
   fence("tram-review-fence-cw", 0, 40.65, 0.4, 2.7);
   fence("tram-review-fence-cw2", 1.7, 40.65, 3.4, 0.4);
@@ -362,7 +639,7 @@ export function buildTramReviewWorld(scene: Scene): WorldRefs {
   // deck cache (rewards the climb), south-verge cache.
   const cacheMat = reviewMat(scene, "tramReviewCacheM", new Color3(0.32, 0.35, 0.38));
   const glowMat = reviewMat(scene, "tramReviewCacheGlowM", new Color3(0.4, 1, 1), new Color3(0.3, 0.9, 1));
-  const cacheSpots = [new Vector3(5.5, 0, 57), new Vector3(5, 0, 30), new Vector3(14, 0, 62.5)];
+  const cacheSpots = [new Vector3(12, 0, 48.5), new Vector3(4.4, 0, 20.5), new Vector3(14, 0, 62.5)];
   const caches: WorldRefs["caches"] = cacheSpots.map((p, i) => {
     const gy = tramGroundHeightAt(p.x, p.z);
     const m = MeshBuilder.CreateBox(`tram-cache-${i}`, { width: 1.6, height: 1.2, depth: 1.6 }, scene);
@@ -375,7 +652,7 @@ export function buildTramReviewWorld(scene: Scene): WorldRefs {
   });
 
   const spawnPoints = [
-    new Vector3(14, 0, 61), new Vector3(5, 0, 50), new Vector3(20, 0, 60),
+    TRAM_SPAWN_POS.clone(), new Vector3(5, 0, 50), new Vector3(20, 0, 60),
     new Vector3(5, 0, 30), new Vector3(8, 0, 24), new Vector3(18, 0, 48),
   ].map((p) => new Vector3(p.x, tramGroundHeightAt(p.x, p.z), p.z));
   return {
@@ -387,7 +664,7 @@ export function buildTramReviewWorld(scene: Scene): WorldRefs {
     towerMeshes: [],
     spawnPoints,
     bossGate: TRAM_BOSS_SPAWN.clone(),
-    // Outer failsafe only (the 2.4 m fence line is the real boundary): 66
+    // Outer failsafe only (the open railing is the real boundary): 66
     // matches the Green Zone so the south verge (z=64 fence) is reachable —
     // bounds clamps to ±(bounds − radius), and 60 would amputate z>59.45.
     bounds: 66,
@@ -396,6 +673,11 @@ export function buildTramReviewWorld(scene: Scene): WorldRefs {
     controllerGroundHeightAt: tramControllerGroundHeightAt,
     bossSpawn: TRAM_BOSS_SPAWN.clone(),
     playerSpawn: { pos: TRAM_SPAWN_POS.clone(), yaw: TRAM_SPAWN_YAW },
+    rampLanes: TRAM_RAMP_LANES.map((lane) => ({ points: lane.points.map((p) => ({ ...p })) })),
+    // The visible boss is wider than the preserved 2 m station ramps. Cap only
+    // environment collision while navigating; combat and separation keep its
+    // authored radius, attack range, damage, and presentation.
+    enemyNavRadiusCap: 0.7,
   };
 }
 
@@ -431,14 +713,10 @@ export async function loadTramReviewStation(
   root.scaling.setAll(TRAM_REVIEW_SCALE);
   root.position.copyFrom(TRAM_REVIEW_OFFSET);
 
-  let disabledCameras = 0;
-  for (const cam of scene.cameras) {
-    if (!camerasBefore.has(cam)) { cam.setEnabled(false); disabledCameras++; }
-  }
-  let disabledLights = 0;
-  for (const light of scene.lights) {
-    if (!lightsBefore.has(light)) { (light as Light).setEnabled(false); disabledLights++; }
-  }
+  const cameras = scene.cameras.filter((cam) => !camerasBefore.has(cam));
+  for (const cam of cameras) cam.setEnabled(false);
+  const lights = scene.lights.filter((light) => !lightsBefore.has(light));
+  for (const light of lights) light.setEnabled(false);
   const materials = scene.materials.filter((m) => !materialsBefore.has(m));
   const textures = scene.textures.filter((t) => !texturesBefore.has(t));
   let totalIndices = 0;
@@ -456,9 +734,38 @@ export async function loadTramReviewStation(
       }
     } catch { /* best effort */ }
   }
+  // The imported platform canopy is one dense, perforated submesh. Build once
+  // after its final parent transform so camera queries never scan scene meshes.
+  const cameraMesh = (result.meshes.find((m) => m.name === "Object_356") as Mesh | undefined) ?? null;
+  let cameraBvh: TramCameraBvh | null;
+  try {
+    cameraBvh = cameraMesh ? buildTramCameraBvh(cameraMesh) : null;
+  } catch (error) {
+    try { root.dispose(true, false); } catch { /* best effort */ }
+    for (const mesh of result.meshes) {
+      try { (mesh as Mesh).dispose(true, false); } catch { /* best effort */ }
+    }
+    for (const camera of cameras) {
+      try { camera.dispose(); } catch { /* best effort */ }
+    }
+    for (const light of lights) {
+      try { light.dispose(); } catch { /* best effort */ }
+    }
+    for (const texture of textures) {
+      try { texture.dispose(); } catch { /* best effort */ }
+    }
+    for (const material of materials) {
+      try { material.dispose(); } catch { /* best effort */ }
+    }
+    throw error;
+  }
   return {
     root,
     meshes: result.meshes as AbstractMesh[],
+    cameras,
+    lights,
+    cameraMesh,
+    cameraBvh,
     materials,
     textures,
     aux: [],
@@ -468,13 +775,58 @@ export async function loadTramReviewStation(
       textureCount: textures.length,
       totalIndices,
       approxTriangles: Math.round(totalIndices / 3),
-      disabledCameras,
-      disabledLights,
+      disabledCameras: cameras.length,
+      disabledLights: lights.length,
+      cameraTriangles: cameraBvh?.triangleCount ?? 0,
+      cameraBvhNodes: cameraBvh?.nodeCount ?? 0,
       boundsMin,
       boundsMax,
     },
     timings,
   };
+}
+
+/** Exact BVH-accelerated camera distance against the imported canopy. */
+export function tramCameraObstruction(
+  load: TramReviewLoad, origin: Vector3, dir: Vector3, maxDist: number,
+): number {
+  if (origin.y < TRAM_PLATFORM_TOP + 1.5 || origin.x < 3 || origin.x > 10.8 || origin.z < 17.5 || origin.z > 40) {
+    return Infinity;
+  }
+  return load.cameraBvh?.intersect(origin, dir, maxDist) ?? Infinity;
+}
+
+/** Slow dev reference used to verify the BVH against Babylon's exact picker. */
+export function tramCameraObstructionReference(
+  load: TramReviewLoad, origin: Vector3, dir: Vector3, maxDist: number,
+): number {
+  if (!load.cameraMesh) return Infinity;
+  const ray = new Ray(origin.clone(), dir.clone(), maxDist);
+  const scene = load.root.getScene();
+  const pick = scene.pickWithRay(ray, (mesh) => mesh === load.cameraMesh, false);
+  return pick?.hit ? pick.distance : Infinity;
+}
+
+/** Dev-only station raycast (world-space segment vs station meshes only). */
+export function tramRaycastStation(
+  scene: Scene, origin: Vector3, dir: Vector3, maxDist: number,
+): { dist: number; mesh: string | null; point: Vector3 | null } {
+  const root = scene.getTransformNodeByName("tram-review-root");
+  if (!root) return { dist: Infinity, mesh: null, point: null };
+  const ray = new Ray(origin.clone(), dir.clone(), maxDist);
+  const pick = scene.pickWithRay(ray, (m: AbstractMesh) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let p: any = m;
+    while (p) {
+      if (p === root) return m.isEnabled() && m.isVisible;
+      p = p.parent;
+    }
+    return false;
+  }, false);
+  if (pick?.hit && pick.pickedPoint && pick.distance < maxDist) {
+    return { dist: pick.distance, mesh: pick.pickedMesh?.name ?? "?", point: pick.pickedPoint.clone() };
+  }
+  return { dist: Infinity, mesh: null, point: null };
 }
 
 /** Dispose the review station and review-only world props (Green Zone untouched — it was never built). */
@@ -490,8 +842,16 @@ export function disposeTramReview(scene: Scene, load: TramReviewLoad | null): vo
   for (const m of load.materials) {
     try { m.dispose(); } catch { /* best effort */ }
   }
+  for (const camera of load.cameras) {
+    try { camera.dispose(); } catch { /* best effort */ }
+  }
+  for (const light of load.lights) {
+    try { light.dispose(); } catch { /* best effort */ }
+  }
   for (const name of ["tram-review-ground", "tram-review-sky",
     "tram-review-ramp-0", "tram-review-ramp-1", "tram-review-ramp-nose-0", "tram-review-ramp-nose-1",
+    "tram-review-guard-w", "tram-review-guard-w-post-21", "tram-review-guard-w-post-28", "tram-review-guard-w-post-36",
+    "tram-review-guard-e", "tram-review-guard-e-post-21", "tram-review-guard-e-post-28", "tram-review-guard-e-post-36",
     "tram-review-bench-0", "tram-review-bench-0-foot--0.7", "tram-review-bench-0-foot-0.7",
     "tram-review-bench-1", "tram-review-bench-1-foot--0.7", "tram-review-bench-1-foot-0.7",
     "tram-review-cover-0", "tram-review-cover-0-cap", "tram-review-cover-1", "tram-review-cover-1-cap",
@@ -581,7 +941,7 @@ export function tramReviewView(name: string): { pos: Vector3; target: Vector3 } 
     case "overview":
       return { pos: new Vector3(43, 22, 86), target: new Vector3(5, 2, 20) };
     case "scale":
-      return { pos: new Vector3(16.2, 1.7, 57.6), target: new Vector3(14, 1.15, 61) };
+      return { pos: new Vector3(8.5, 1.7, 59), target: new Vector3(5, 1.15, 53.5) };
     case "passage":
       return { pos: new Vector3(11, 2.2, 56), target: new Vector3(17, 1.0, 46) };
     case "combat":

@@ -20,3 +20,4 @@ public/tram-review/
 *.vpd
 # Temporary Playwright recordings; finalized review videos live in artifacts/.
 artifacts/chaser-video-raw/
+artifacts/*-video-temp/

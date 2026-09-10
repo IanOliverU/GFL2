@@ -17,7 +17,7 @@ import { GameUI, HudState } from "./ui";
 import { eligibleChoices, rollChoices, applyChoice, UpgradeChoice } from "./progression";
 import { synth, loadSettings, saveSettings, Settings } from "./audio";
 import { tryLoadCharacterAsset } from "./assets";
-import { TRAM_SPAWN_POS, TRAM_SPAWN_YAW, buildTramReviewWorld, disposeTramReview, isTramReviewRequested, loadTramReviewStation, tramGroundHeightAt, tramProbeGrid, tramReviewView, tramTrimOutside, type TramReviewLoad } from "./tram-review";
+import { TRAM_SPAWN_POS, TRAM_SPAWN_YAW, buildTramReviewWorld, disposeTramReview, isTramReviewRequested, loadTramReviewStation, tramCameraObstruction, tramCameraObstructionReference, tramGroundHeightAt, tramProbeGrid, tramRaycastStation, tramReviewView, tramTrimOutside, type TramReviewLoad } from "./tram-review";
 import { getTololoRest, measureTololoHold, mountRifleToHand, parkTololoSpare, resetTololoLocomotion, restoreRifleHip, takeSpareTololo, tickTololoVisual, tololoLocomotionMode, tryLoadTololoPmx } from "./tololo-visual";
 import { isAttachmentCompatible, nextLoopTransition } from "./rules";
 
@@ -178,6 +178,12 @@ export class Game {
         trimOutside: (x0: number, x1: number, z0: number, z1: number) =>
           this.tramLoad ? tramTrimOutside(this.tramLoad, x0, x1, z0, z1) : null,
         groundAt: (x: number, z: number) => tramGroundHeightAt(x, z),
+        rayStation: (ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxDist: number) =>
+          tramRaycastStation(this.scene, new Vector3(ox, oy, oz), new Vector3(dx, dy, dz), maxDist),
+        cameraDistance: (ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxDist: number) =>
+          this.tramLoad ? tramCameraObstruction(this.tramLoad, new Vector3(ox, oy, oz), new Vector3(dx, dy, dz), maxDist) : Infinity,
+        cameraDistanceReference: (ox: number, oy: number, oz: number, dx: number, dy: number, dz: number, maxDist: number) =>
+          this.tramLoad ? tramCameraObstructionReference(this.tramLoad, new Vector3(ox, oy, oz), new Vector3(dx, dy, dz), maxDist) : Infinity,
       };
     }
     this.applyControlSettings();
@@ -264,6 +270,7 @@ export class Game {
     this.ui.closeModal();
     this.ui.resetTransient();
     this.sim.startRun(charId);
+    this.placeTramSpawn();
     if (this.sim.externalRoot) resetTololoLocomotion(this.sim.externalRoot);
     this.attachmentQueue = [];
     this.pendingAttach = null;
@@ -313,7 +320,6 @@ export class Game {
   restart(): void {
     const id = this.sim.build?.charId ?? "tololo";
     this.startRun(id);
-    this.placeTramSpawn();
   }
 
   /**
@@ -353,6 +359,9 @@ export class Game {
       this.tramLoad = await loadTramReviewStation(this.scene, (loaded, total) => {
         this.tramStatus = { phase: "loading", loaded, total, error: null };
       });
+      const load = this.tramLoad;
+      this.sim.world.cameraObstruction = (origin, direction, maxDist) =>
+        tramCameraObstruction(load, origin, direction, maxDist);
       this.sim.pos.copyFrom(TRAM_SPAWN_POS);
       this.sim.vel.set(0, 0, 0);
       this.sim.visualVel.set(0, 0, 0);
@@ -380,6 +389,7 @@ export class Game {
   /** Dispose the review station and its review-only props (Green Zone was never built). */
   exitTramReview(): void {
     if (!this.tramLoad) return;
+    this.sim.world.cameraObstruction = undefined;
     disposeTramReview(this.scene, this.tramLoad);
     this.tramLoad = null;
     this.debugCamera = null;

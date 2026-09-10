@@ -1,16 +1,19 @@
 # Tram Station — suitability evaluation (local review only)
 
-Status: **district preview playable; suitability NOT accepted — owner decision
-required.** See §13 for the district-preview milestone built on this
-evaluation. The Green Zone remains the default; the district is selected
-explicitly and never replaces it.
+Status: **district preview playable; source-only repository publication
+approved 2026-09-10; asset redistribution suitability NOT accepted.** See §13
+for the district-preview milestone built on this evaluation. The Green Zone
+remains the default; the district is selected explicitly and never replaces it.
 
 Review question: **Does this station fit Tololo and our combat, and is using the
 whole asset or selected modules the better next step?**
 
-Do not commit, push, deploy, publish, or redistribute this evaluation slice.
-No full-stage replacement was made; the Green Zone remains the only shipped
-stage. Tololo locomotion, rifle hold, firing origin, RMB camera, and gameplay
+The owner approved committing and pushing this source, documentation, and
+review evidence. Do not deploy or redistribute the ignored source asset; it
+remains excluded from production builds and requires a separate suitability
+verdict plus visible CC-BY-4.0 attribution before shipping. No full-stage
+replacement was made; the Green Zone remains the only shipped stage. Tololo
+locomotion, rifle hold, firing origin, RMB camera, and Green Zone gameplay
 behavior are untouched (locomotion stays ready-for-review, unaccepted).
 
 ## 1. Asset paths, sizes, belonging
@@ -116,7 +119,7 @@ New/changed code (all inert unless explicitly requested):
   disposes station + review props; `window.__tramReview` harness hooks.
 - `src/main.ts` — autostart enters review mode when `scene=tram-review`.
 - `.gitignore` — defensive `public/tram-review/` guard (no such copy exists).
-- `scripts/tram-review.mjs` (`npm run test:tram-review`) — full matrix harness.
+- `scripts/tram-circuit-check.mjs` (`npm run test:tram-review` / `test:tram-circuit`) — full matrix harness.
 
 Launch URL (dev server on 5173; this environment binds IPv6 localhost, so use
 `localhost`, not `127.0.0.1`):
@@ -291,7 +294,8 @@ Zone; instead the **full district is the primary development preview** with a
 bounded playable station area. The Green Zone is preserved untouched as the
 selectable fallback (default URLs unchanged; all existing harnesses keep
 passing). No extraction work existed beyond runtime measurement helpers, which
-are retained. No commit, push, deployment, or publication.
+are retained. At this checkpoint no commit, push, deployment, or publication
+had occurred; repository publication was approved after §16.
 
 ### 13.1 Local-only packaging fix (was §10 residual)
 
@@ -401,7 +405,8 @@ Direction: per milestone brief, the apron, kiosk passage, and one
 platform/canopy section are now ONE bounded playable circuit. The full
 district stays loaded and untouched (scenery outside the circuit); the Green
 Zone remains the default selectable fallback (all GZ harnesses keep
-passing). No commit/push/deploy/publication. Tololo scale, grounding, rifle
+passing). At this checkpoint no commit/push/deploy/publication had occurred.
+Tololo scale, grounding, rifle
 hold, firing origin, locomotion, RMB behavior, combat balance, and
 progression are preserved (verified by re-running the GZ Tololo suites
 unchanged — see §14.5).
@@ -543,8 +548,10 @@ uninspected (no Blender); captured stills/video await owner eyes.
 
 ### 14.8 Resume checkpoint (exact state for the next session)
 
-- Branch `main`, remote `https://github.com/IanOliverU/GFL2.git`. All
-  circuit work UNCOMMITTED (local-only slice — do not commit/push/deploy).
+- Historical checkpoint: branch `main`, remote
+  `https://github.com/IanOliverU/GFL2.git`; all circuit work was uncommitted at
+  that time. Repository publication was approved after §16; deployment and
+  asset redistribution remain unapproved.
 - Modified: `src/world.ts` (WorldRefs optionals), `src/sim.ts` (gh/cgh +
   bossSpawn), `src/tram-review.ts` (circuit world + sky + ground fns),
   `src/game.ts` (placeTramSpawn + groundAt hook), `package.json`
@@ -560,3 +567,250 @@ uninspected (no Blender); captured stills/video await owner eyes.
   `GPU_MODE=hardware` for the capped-GPU twin).
 - Visual acceptance (gait, hold close-ups, circuit stills/video) remains
   with the owner; Tololo PMX + tram GLB stay git-ignored, dev-served only.
+
+## 15. Tram-circuit correction pass (2026-09-09, implementation done, owner suitability/visual acceptance pending)
+
+Bounded pass only: efficient canopy camera clearance, ordered ramp routing,
+shooting regression, comparable performance evidence. At this checkpoint no
+commit/push/deploy had occurred; repository publication was approved after §16.
+Green Zone, Tololo, gameplay balance, and all uncommitted work preserved.
+Tram/PMX assets remain git-ignored, dev-served only, excluded from production
+(`npm run build` + `check-prod-assets` OK). Shipping requires an explicit
+owner suitability verdict plus visible CC-BY attribution to Randonavt.
+
+### 15.1 Canopy camera: exact build-once BVH (replaces per-frame scene picking)
+
+`Object_356` is one dense perforated canopy/arch submesh (10,028 triangles,
+single submesh). The old `tramCameraObstruction()` ran Babylon
+`scene.pickWithRay` every render frame (1–2 queries with the opposite-shoulder
+fallback), scanning scene meshes plus the full 10,028-triangle submesh.
+Coarse proxies were measured and rejected: one tight AABB per disconnected
+component (20 boxes) falsely blocked 49/60 scripted shoulder rays and 60.7%
+of a dense platform matrix — perforated arches cannot be boxed.
+
+Replacement (`src/tram-review.ts`, dev-only review path): median-split BVH
+built once after the station root transform (leaf ≤ 8; 4,095 nodes, 2,048
+leaves, ~4.9 tris/leaf; local-space geometry + frozen inverse world matrix;
+two-sided Möller–Trumbore with Babylon's 0.001 barycentric edge tolerance;
+allocation-free query with a reusable stack). It preserves the existing
+platform-origin gate, nearest-hit distance semantics, authored
+`world.colliders`, and the opposite-shoulder fallback in `src/sim.ts`
+unchanged. `TramReviewStats` gains `cameraTriangles` / `cameraBvhNodes`;
+dev-only `__tramReview` gains `cameraDistance` / `cameraDistanceReference`.
+
+Exactness (`scripts/tram-bvh-check.mjs`, headless WebGL2, `cameraDistance` vs
+Babylon reference): 60 scripted platform rays plus 2,000 deterministic
+pseudo-random camera-domain rays — 0 mismatches, max error 5.83e-7 m
+(threshold 1e-4 m). Query cost for the same 500-ray sample: 1.3 ms BVH vs
+99.3 ms reference — ~76× faster per query; per-frame camera cost (three
+centre/width queries, up to six during a shoulder fallback) is now negligible.
+
+`src/sim.ts` near-wall fix (same pass): the old fixed 0.6 m camera minimum
+pushed the camera/crosshair through the K1 face when hugging it (collision
+distance < 0.6 m). The clamp now squeezes to the player side
+(`hit − 0.05`, min 0.05) instead of crossing the surface; normal 3–6 m
+camera distances unchanged.
+
+### 15.2 Routing, shooting, camera probes (automated, text-only)
+
+- Ordered tram links (`src/tram-review.ts`): ramp A
+  (5,43.4)→(5,40)→(5,36); ramp B (13,43.4)→(8,43.4)→(8,40)→(8,36).
+  Stage-only `enemyNavRadiusCap: 0.7`; combat ranges, separation, speed,
+  damage, and Green Zone behavior keep authored values. `Enemy` route state
+  + controller-support-height routing in `src/sim.ts`; same-floor jumps no
+  longer falsely trigger ramp routing.
+- `scripts/tram-routing-check.mjs`: 7/7 pass, zero rescue teleports
+  (chaser A-up, chaser B corridor/east-up, heavy B-up, boss B-east-up,
+  chaser/heavy B-down); same-floor jump `routed: false`.
+- Historical §15 closed-panel build, `scripts/tram-fix-verify3.mjs`
+  (`ERRORS: []`): ramp-A axis
+  open (234 dmg), ramp-B mouth open (221), north fence blocked (0),
+  pursuit-B deck arrival with 0 rescues, deck/apron holds containment
+  (jump/dodge/Phase Step south, deck north walk, west walk), camera full
+  5.65 m on all close poses.
+- Station probe (30 poses, both raw shoulders): 11 genuine obstruction rays
+  (arch faces at z≈27.27/27.40/36.38–36.51, longitudinal roof side), 5
+  primary-triggered shoulder swaps, all 30 finally selected segments clear
+  at ~5.72 m. `scripts/tram-fix-camprobe.mjs`: deck S–N / N–S-aim traverses
+  clean (no solid entries, full min distances); apron E–W shows only
+  expected kiosk-K2 collider cover (4 samples, zero close-camera samples).
+- Normal tram deployment: `Game.startRun()` calls `placeTramSpawn()`
+  (duplicate removed from `restart()`).
+
+### 15.3 Comparable performance (identical conditions, NOT a suitability verdict)
+
+New `scripts/tram-comparable-perf.mjs`: same browser/GPU mode, viewport
+1280×720, Tololo PMX, zero enemies/caches, relay+3 m gameplay camera, 4 s
+equal warm-up, alternating order tram,gz,gz,tram, per-run source hashes.
+Software result (`artifacts/tram-comparable-perf-software.json`):
+tram 306.8 ms avg / 341 draws / 344 active meshes / 612,690 indices vs
+Green Zone 103.1 ms / 91 / 75 / 195,552 — ratios 2.98× frame, 3.75× draws,
+4.59× meshes, 3.13× indices. Draw structure is unchanged by the BVH; the
+BVH removed the camera-picking CPU overhead while the remaining gap is the
+imported station's draw weight (834 meshes, 76 materials, 82 textures,
+~612 k triangles; no duplicate import or per-frame mesh creation found).
+The circuit harness's internal GZ baseline is a different view and is not
+the comparable sample — use the file above.
+
+### 15.4 Ordinary play + circuit re-run (BVH build)
+
+- `scripts/tram-ordinary-session.mjs` (ordinary pointer-lock input, no
+  godmode/overrides): ramp B up and down, spawn-cache loot, relay
+  activation, boss spawn + damage (2645 → 2411), alive at end. Inspected
+  this session: `artifacts/tram-ordinary-platform.png`,
+  `tram-ordinary-relay.png`, `tram-ordinary-boss.png`,
+  `tram-ordinary-session.webm`.
+- `scripts/tram-circuit-check.mjs` (software, this session): all text
+  checks pass (ground 1.45/0.725/0, ramp-A climb, deck traverse, sheer
+  face hold, ramp-B descent, kiosk passage to deck, deck hold ~0, relay →
+  boss in-circuit, deck-cache loot, jump/dodge/Phase holds, north hold,
+  8-enemy fight, victory, loop, restart meshes 1129==1129). Perf snapshot:
+  idle 374 ms / 349 draws, traversal 392 / 346, 8-fight 412 / 408;
+  internal GZ spawn baseline 126 / 112 (different view — see §15.3).
+  Captures saved (`tram-circuit-*.png`, `tram-circuit-walkthrough.webm`,
+  `tram-circuit-report.json`); full-motion smoothness acceptance remains
+  with the owner.
+- Full suite (this session): `npm test` 8 files / 50 pass;
+  `npx tsc --noEmit` clean; `npm run build` clean + `check-prod-assets`
+  OK; `npm run test:browser` isolated pass (pointer lock, 6 kits,
+  4 screenshots, 0 errors — the earlier concurrent-run WebSocket 400 was
+  a parallel-harness collision, resolved by rerunning alone);
+  `git diff --check` clean (LF/CRLF warnings only).
+
+### 15.5 Diagnostic inventory (retain, do not lose work)
+
+Canonical: `scripts/tram-routing-check.mjs` (routing),
+`scripts/tram-fix-verify3.mjs` (shooting/containment/camera),
+`scripts/tram-bvh-check.mjs` (exact BVH/reference comparison),
+`scripts/tram-comparable-perf.mjs` +
+`artifacts/tram-comparable-perf-software.json` (comparable perf),
+`scripts/tram-circuit-check.mjs` + `artifacts/tram-circuit-report.json`
+(circuit). Historical §15 ordinary evidence, superseded by §16's corrected
+spawn/layout: `scripts/tram-ordinary-session.mjs` +
+`artifacts/tram-ordinary-*`. One-off `tram-camera-station-probe.mjs` and
+`tram-fix-*` elevation diagnostics remain local and are not canonical checks.
+Failed/retry-heavy — do NOT present as final:
+`artifacts/tram-play-*`, `tram-play-out.txt`,
+`scripts/tram-fix-playsession.mjs`. Scratch: `scripts/tram-scout.tmp.mjs`.
+`§14.8`'s `tram-circuit-probe*` / `tram-debug-*` names do not exist;
+the actual scratch set is the `tram-fix-*` list above.
+
+## 16. Open station layout and spawn-camera correction (2026-09-10, owner visual acceptance pending)
+
+Owner feedback on the §15 ordinary recording was confirmed: opaque perimeter
+panels boxed the apron, 3 m platform panels read as corridor walls, the spawn
+looked back through a cache/relay composition, and frames around 7.5–8.5 s
+showed a canopy rib filling the camera despite an exact collision-clear ray.
+This correction stays inside the existing x 0…26 / z 18…64 circuit. No map
+expansion, characters, animation, balance, progression, aiming controls,
+asset bytes, packaging, or deployment changes were made.
+
+### 16.1 Boundary presentation and collision
+
+- Replaced every dominant opaque perimeter/platform panel with an open station
+  railing: 0.22 m concrete curb, two 0.12 m horizontal steel bars, and steel
+  posts spaced no farther than ~2.6 m. Grade railings rise 1.7 m; platform
+  railings start at deck y=1.45 and rise 1.65 m (world top ~3.10).
+- Removed the redundant knee-high platform guard that occupied the same edge.
+  Rail steel is now muted canopy blue and curbs use darker concrete, avoiding
+  the temporary pale-panel appearance. Each segment's steel pieces are merged
+  visually after construction; final base scene count is 1121 (previous
+  correction build 1129).
+- Every visible curb, bar, and post has its own matching AABB. Movement,
+  camera, and hitscan queries therefore agree with the presentation: open
+  spaces are actually open, while visible bars/posts block at their physical
+  height. Continuous bars still overlap the controller body during jump,
+  dodge, and Phase Step, including the deck-jump apex. No unexplained full
+  invisible boundary remains.
+- Solid cover remains only at measured kiosk volumes, relay mast/base, benches,
+  and two deliberate apron blocks. The west block moved from (5,60) to
+  (19,61), clearing the initial route without adding props.
+
+### 16.2 Spawn composition
+
+- `TRAM_SPAWN_POS = (5,0,53.5)`, yaw 0: Tololo now faces straight north through
+  the west kiosk passage and ramp A toward the canopy/platform. Tracks, kiosks,
+  both platforms, bridge, and district are visible immediately through the
+  railings. Relay mast and south cache are off-axis.
+- The initial normal camera converges to (5.90,2.75,59.08), full 5.72 m from
+  the pivot and still inside the south boundary. The old spawn at (14,0,61)
+  placed the desired camera beyond z=66 and centered the relay/cache cluster.
+- Cache 0 moved to (12,0,48.5) and deck cache to (4.4,1.45,20.5), keeping
+  objective rewards out of the spawn/platform foreground. No reward count or
+  behavior changed.
+- `Game.startRun()`, `restart()`, and `continueLoop()` all use the same world
+  `playerSpawn`. The circuit check now asserts exact X/Z/yaw, not merely that
+  the result is inside the broad circuit.
+
+### 16.3 Canopy framing (existing BVH retained)
+
+The exact §15 canopy BVH and its collision result are unchanged. Camera
+selection now samples two additional BVH rays parallel to the center ray at
+±0.45 m lateral offset. This approximates lens width, preventing a perforated
+arch edge from skimming the lens when the center ray happens to pass through a
+hole. The current shoulder is persistent, resets on `startRun`, and switches
+only when obstructed and the opposite side gains more than 0.65 m clearance;
+this removes per-rib left/right flicker. Distance, pitch/yaw input, normal/RMB
+distances, crosshair targeting, and aim controls are otherwise unchanged.
+
+The new ordinary recording makes one stable shoulder change entering the
+platform. Six sampled consecutive motion frames keep the nearest rib at the
+edge instead of across the target. Normal view retains the route/opposite
+platform; RMB records 3.40 m actual smoothed distance (3.2 m authored target,
+with movement interpolation), without abrupt near-pivot squeeze.
+
+### 16.4 Focused verification
+
+- `scripts/tram-open-ordinary-traversal.mjs`: PASS. Ordinary title/select/
+  deploy, real pointer lock, no godmode or gameplay/position overrides after
+  start; spawn → kiosk passage → ramp A/platform → ordinary mouse rotation +
+  RMB movement under canopy → ramp A/apron. Simulation 7.27 s; continuous WebM
+  10.60 s including UI/load transitions; no browser errors.
+- `scripts/tram-routing-check.mjs`: PASS 7/7. Chaser ramp A up; chaser B
+  corridor/east up; heavy and boss B up; chaser/heavy B down; zero rescue
+  teleports; same-floor jump `routed:false`.
+- `scripts/tram-fix-verify3.mjs`: both ramp firing lanes deal damage; visible
+  north-railing openings pass shots (with intervening rounds correctly
+  striking bars); solid K1 kiosk cover
+  blocks completely (0 damage); ramp-B pursuit reaches deck with zero rescues;
+  south jump/dodge/Phase Step, north deck, and west boundary hold; all camera
+  close poses retain ~5.65 m horizontal distance; `ERRORS:[]`.
+- `scripts/tram-circuit-check.mjs` SwiftShader: PASS after making the moved
+  deck-cache check data-driven. Ramp A climb, ramp B descent, kiosk passage,
+  relay/boss, caches, containment, victory, loop, and restart pass. Loop and
+  restart both restore exactly (5,53.5,yaw 0); scene meshes 1121==1121.
+- Final suite: `npm test` 8 files / 50 tests pass; `npx tsc --noEmit` clean;
+  `npm run build` clean and `check-prod-assets` OK (311 files, no local-only
+  assets packaged); Green Zone `npm run test:browser` passes with
+  `GAME_URL=http://localhost:5173` (WebGL2, pointer lock, 6 kits, 4 captures,
+  0 errors). The first smoke invocation used its default `127.0.0.1` against
+  a localhost-only server and failed before app load; the documented URL
+  override resolved it without a code change.
+
+### 16.5 Local review evidence
+
+Directly inspected in-session (contact sheets used to limit image-provider
+attachments):
+
+- Before: `artifacts/tram-open-before-spawn.png`,
+  `tram-open-before-reverse.png`, `tram-open-before-platform.png`.
+- After: `artifacts/tram-open-after-spawn.png`,
+  `tram-open-after-reverse.png`, `tram-open-after-platform.png`.
+- Side-by-side inspection: `artifacts/tram-open-before-after-contact.png`.
+- Ordinary traversal endpoints: `tram-open-traversal-spawn.png`,
+  `tram-open-traversal-platform-normal.png`,
+  `tram-open-traversal-platform-rmb.png`,
+  `tram-open-traversal-apron.png`; combined as
+  `tram-open-traversal-contact.png`.
+- Continuous ordinary recording/report:
+  `artifacts/tram-open-ordinary-traversal.webm`,
+  `artifacts/tram-open-ordinary-report.json`. The canopy motion interval was
+  sampled at 2 FPS in `tram-open-canopy-motion-contact.png` and inspected.
+
+The latest regenerated `tram-circuit-*.png` and diagnostic
+`tram-circuit-walkthrough.webm` were not reopened during this pass; their
+automated assertions passed, but they are not visual evidence for the owner
+feedback. Full real-time smoothness and final visual suitability of the new
+ordinary WebM remain owner decisions. Tram/PMX remain local-only and
+git-ignored; any shipping still requires the explicit suitability verdict and
+visible Randonavt CC-BY-4.0 attribution recorded in §2.

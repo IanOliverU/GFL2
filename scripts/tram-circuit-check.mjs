@@ -224,6 +224,25 @@ try {
   await shot("tram-circuit-platform.png", "platform");
   await shot("tram-circuit-ramp.png", "ramp");
 
+  // Interact priority at the south verge: cache (14,62.5) sits inside
+  // relay prompt range — nearest-wins must loot it WITHOUT activating.
+  // Exercise the edge of the shared prompt/action radius as well as the
+  // relay overlap; the old 3.0/3.2 mismatch made this exact band lie.
+  await place(14, 59.4, Math.PI);
+  const priorityPrompt = await page.evaluate(() => window.__gflGame.sim.nearestInteractable());
+  assert.equal(priorityPrompt, "Open Cache", "overlap prompt did not prefer the nearer cache");
+  await page.evaluate(() => window.__gflGame.input.pressed.add("KeyF"));
+  await page.waitForTimeout(800);
+  const priority = await page.evaluate(() => ({
+    taken2: window.__gflGame.sim.world.caches[2].taken,
+    relayActive: window.__gflGame.sim.relayActive,
+    prompt: window.__gflGame.sim.nearestInteractable(),
+  }));
+  await page.evaluate(() => window.__gflGame.ui.closeModal());
+  report.checks.interactPriority = { beforePrompt: priorityPrompt, ...priority };
+  assert.equal(priority.taken2, true, "south-verge cache was not looted (nearest-wins broken)");
+  assert.equal(priority.relayActive, false, "relay stole F from the nearer cache");
+
   // Relay activation at the new ring.
   await place(16, 58.5, Math.PI);
   await page.evaluate(() => window.__gflGame.input.pressed.add("KeyF"));
@@ -241,8 +260,13 @@ try {
   assert.ok(relay.bossPos && relay.bossPos.x > 10 && relay.bossPos.x < 26, `boss arrived outside circuit: ${JSON.stringify(relay.bossPos)}`);
   await shot("tram-circuit-relay.png", "relay");
 
-  // Deck cache loot (F at (5,30)): proves interact works at deck height.
-  await place(5, 31.5, 0);
+  // Deck cache loot: derive the approach from stage data so composition moves
+  // do not silently leave this interaction check at stale coordinates.
+  const deckCachePos = await page.evaluate(() => {
+    const pos = window.__gflGame.sim.world.caches[1].pos;
+    return { x: pos.x, z: pos.z };
+  });
+  await place(deckCachePos.x, deckCachePos.z + 1.5, 0);
   await page.evaluate(() => window.__gflGame.input.pressed.add("KeyF"));
   await page.waitForTimeout(800);
   const cache = await page.evaluate(() => ({
@@ -375,12 +399,18 @@ try {
     loop: window.__gflGame.sim.loop,
     x: +window.__gflGame.sim.pos.x.toFixed(1),
     z: +window.__gflGame.sim.pos.z.toFixed(1),
+    yaw: +window.__gflGame.sim.yaw.toFixed(2),
+    expectedX: window.__gflGame.sim.world.playerSpawn.pos.x,
+    expectedZ: window.__gflGame.sim.world.playerSpawn.pos.z,
+    expectedYaw: window.__gflGame.sim.world.playerSpawn.yaw,
     relayReset: !window.__gflGame.sim.relayActive,
   }));
   report.checks.loop = loop;
   assert.equal(loop.state, "playing", "loop continuation did not resume playing");
   assert.equal(loop.loop, 1, "loop counter did not advance");
-  assert.ok(loop.x > 0 && loop.x < 26 && loop.z > 42 && loop.z < 64, `loop spawn outside circuit: ${loop.x},${loop.z}`);
+  assert.equal(loop.x, loop.expectedX, "loop did not restore tram spawn X");
+  assert.equal(loop.z, loop.expectedZ, "loop did not restore tram spawn Z");
+  assert.ok(Math.abs(loop.yaw - loop.expectedYaw) < 0.01, "loop did not restore tram spawn heading");
 
   // Restart keeps the station loaded exactly once and resets encounter state.
   const meshesBefore = await page.evaluate(() => window.__gflGame.scene.meshes.length);
@@ -398,11 +428,17 @@ try {
     tramStillLoaded: window.__tramReview.status().phase,
     x: +window.__gflGame.sim.pos.x.toFixed(1),
     z: +window.__gflGame.sim.pos.z.toFixed(1),
+    yaw: +window.__gflGame.sim.yaw.toFixed(2),
+    expectedX: window.__gflGame.sim.world.playerSpawn.pos.x,
+    expectedZ: window.__gflGame.sim.world.playerSpawn.pos.z,
+    expectedYaw: window.__gflGame.sim.world.playerSpawn.yaw,
   }));
   report.restart = { meshesBefore, ...restart };
   assert.equal(restart.meshesAfter, meshesBefore, "restart duplicated or leaked station resources");
   assert.equal(restart.tramStillLoaded, "ready", "station did not survive restart");
-  assert.ok(restart.x > 0 && restart.x < 26 && restart.z > 42 && restart.z < 64, `restart spawn outside circuit: ${restart.x},${restart.z}`);
+  assert.equal(restart.x, restart.expectedX, "restart did not restore tram spawn X");
+  assert.equal(restart.z, restart.expectedZ, "restart did not restore tram spawn Z");
+  assert.ok(Math.abs(restart.yaw - restart.expectedYaw) < 0.01, "restart did not restore tram spawn heading");
 
   await shot("tram-circuit-circuit.png", "circuit");
   await page.evaluate(() => {

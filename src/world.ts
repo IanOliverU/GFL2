@@ -36,6 +36,12 @@ export interface WorldRefs {
   bossSpawn?: Vector3;
   /** Optional stage-specific player spawn (tram: apron pad). */
   playerSpawn?: { pos: Vector3; yaw: number };
+  /** Optional ordered apron-to-deck navigation links (tram step-ramps). */
+  rampLanes?: { points: { x: number; z: number }[] }[];
+  /** Stage-only environment clearance; combat ranges keep the full radius. */
+  enemyNavRadiusCap?: number;
+  /** Optional visual-geometry camera obstruction distance for imported stages. */
+  cameraObstruction?: (origin: Vector3, direction: Vector3, maxDist: number) => number;
 }
 
 export function groundHeightAt(x: number, z: number): number {

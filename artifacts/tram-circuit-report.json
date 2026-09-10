@@ -1,7 +1,7 @@
 {
   "status": "tram connected circuit evidence (NOT suitability accepted)",
-  "conditions": "headless Chrome 1280x720, forced WebGL2, real GPU (D3D11 ANGLE)",
-  "gpuMode": "hardware",
+  "conditions": "headless Chrome 1280x720, forced WebGL2, SwiftShader",
+  "gpuMode": "software",
   "launchUrl": "/?dev=1&scene=tram-review&autostart=1&char=tololo&god=1&nolock=1&renderer=webgl",
   "captures": [
     "tram-circuit-overview.png",
@@ -23,13 +23,13 @@
     "climbRampA": {
       "x": 5,
       "y": 1.45,
-      "z": 29.38,
+      "z": 29.25,
       "yaw": 0
     },
     "deckTraverse": {
       "x": 6.6,
       "y": 1.45,
-      "z": 26.21,
+      "z": 28.85,
       "yaw": 0
     },
     "sheerFace": {
@@ -41,7 +41,7 @@
     "descendRampB": {
       "x": 8,
       "y": 0,
-      "z": 43.35,
+      "z": 44.05,
       "yaw": 3.14
     },
     "kioskPassage": {
@@ -56,21 +56,27 @@
       "stockErr": 0,
       "barrelDeg": 0
     },
+    "interactPriority": {
+      "beforePrompt": "Open Cache",
+      "taken2": true,
+      "relayActive": false,
+      "prompt": "Activate Relay"
+    },
     "relay": {
       "active": true,
       "boss": true,
       "bossPos": {
-        "x": 21.4,
-        "z": 58.2
+        "x": 23.5,
+        "z": 58
       }
     },
     "cache": {
       "taken": [
         false,
         true,
-        false
+        true
       ],
-      "opened": 1
+      "opened": 2
     },
     "jumpHold": {
       "x": 14,
@@ -105,13 +111,17 @@
     "loop": {
       "state": "playing",
       "loop": 1,
-      "x": 14,
-      "z": 61,
+      "x": 5,
+      "z": 53.5,
+      "yaw": 0,
+      "expectedX": 5,
+      "expectedZ": 53.5,
+      "expectedYaw": 0,
       "relayReset": true
     }
   },
-  "loadWaitMs": 1766,
-  "webglRenderer": "ANGLE (AMD, AMD Radeon RX 9070 (0x00007550) Direct3D11 vs_5_0 ps_5_0, D3D11)",
+  "loadWaitMs": 4012,
+  "webglRenderer": "ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)",
   "tramPhase": "ready",
   "tramError": null,
   "relayPos": {
@@ -124,15 +134,15 @@
   "caches": [
     {
       "_isDirty": true,
-      "_x": 5.5,
+      "_x": 12,
       "_y": 0,
-      "_z": 57
+      "_z": 48.5
     },
     {
       "_isDirty": true,
-      "_x": 5,
+      "_x": 4.4,
       "_y": 1.45,
-      "_z": 30
+      "_z": 20.5
     },
     {
       "_isDirty": true,
@@ -144,9 +154,9 @@
   "spawnPoints": [
     {
       "_isDirty": true,
-      "_x": 14,
+      "_x": 5,
       "_y": 0,
-      "_z": 61
+      "_z": 53.5
     },
     {
       "_isDirty": true,
@@ -203,49 +213,53 @@
     "cachesReset": true,
     "relayReset": true,
     "tramStillLoaded": "ready",
-    "x": 14,
-    "z": 61
+    "x": 5,
+    "z": 53.5,
+    "yaw": 0,
+    "expectedX": 5,
+    "expectedZ": 53.5,
+    "expectedYaw": 0
   },
   "perf": {
     "idle": {
       "label": "tram circuit idle apron",
-      "fps": 165.5452668044255,
-      "frameMsAvg": 6.060483870967742,
-      "frameMsP95": 6.19999999999709,
-      "activeMeshes": 344,
-      "activeIndices": 633396,
+      "fps": 3.650240584038317,
+      "frameMsAvg": 291.51000000000056,
+      "frameMsP95": 351.6000000000058,
+      "activeMeshes": 347,
+      "activeIndices": 650940,
       "totalMeshes": 1121,
-      "drawCallsPerFrame": 341.16700201207243
+      "drawCallsPerFrame": 343.6363636363636
     },
     "traversal": {
       "label": "tram circuit traversal",
-      "fps": 165.05823627296047,
-      "frameMsAvg": 6.07292929292929,
-      "frameMsP95": 6.19999999999709,
-      "activeMeshes": 306,
-      "activeIndices": 569625,
+      "fps": 2.992419204681439,
+      "frameMsAvg": 334.8374999999978,
+      "frameMsP95": 345.3999999999942,
+      "activeMeshes": 340,
+      "activeIndices": 635142,
       "totalMeshes": 1121,
-      "drawCallsPerFrame": 321.66733870967744
+      "drawCallsPerFrame": 340.3333333333333
     },
     "combat": {
       "label": "tram circuit 8-enemy fight",
-      "fps": 161.55896069279115,
-      "frameMsAvg": 6.210743801652892,
-      "frameMsP95": 6.200000000004366,
-      "activeMeshes": 429,
-      "activeIndices": 808722,
+      "fps": 2.7397260273972237,
+      "frameMsAvg": 385.58749999999964,
+      "frameMsP95": 406.1000000000058,
+      "activeMeshes": 410,
+      "activeIndices": 796026,
       "totalMeshes": 1195,
-      "drawCallsPerFrame": 413.19175257731956
+      "drawCallsPerFrame": 400
     }
   },
   "gzBaseline": {
     "label": "green zone idle spawn",
-    "fps": 164.16916416908273,
-    "frameMsAvg": 6.097560975609761,
-    "frameMsP95": 6.199999999999818,
-    "activeMeshes": 107,
-    "activeIndices": 239034,
-    "totalMeshes": 406,
-    "drawCallsPerFrame": 119.50101419878297
+    "fps": 9.595658791608763,
+    "frameMsAvg": 108.22142857142855,
+    "frameMsP95": 272.7000000000003,
+    "activeMeshes": 103,
+    "activeIndices": 238146,
+    "totalMeshes": 380,
+    "drawCallsPerFrame": 114.86206896551724
   }
 }

@@ -1,0 +1,113 @@
+{
+  "pass": true,
+  "mode": "ordinary pointer-lock movement and rotation; no godmode or gameplay overrides",
+  "renderer": "WebGL2 via --use-angle=d3d11",
+  "log": [
+    {
+      "label": "SPAWN",
+      "state": "playing",
+      "locked": true,
+      "godmode": false,
+      "t": 0.73,
+      "x": 5,
+      "y": 0,
+      "z": 53.5,
+      "yaw": 0,
+      "aiming": false,
+      "cameraDistance": 5.72,
+      "cameraShoulder": 1
+    },
+    {
+      "label": "KIOSK-PASSAGE",
+      "state": "playing",
+      "locked": true,
+      "godmode": false,
+      "t": 2.02,
+      "x": 5,
+      "y": 0,
+      "z": 44.56,
+      "yaw": 0,
+      "aiming": false,
+      "cameraDistance": 6.76,
+      "cameraShoulder": 1
+    },
+    {
+      "label": "PLATFORM-ENTRY",
+      "state": "playing",
+      "locked": true,
+      "godmode": false,
+      "t": 2.88,
+      "x": 5,
+      "y": 1.45,
+      "z": 35.87,
+      "yaw": 0,
+      "aiming": false,
+      "cameraDistance": 6.77,
+      "cameraShoulder": 1
+    },
+    {
+      "label": "PLATFORM",
+      "state": "playing",
+      "locked": true,
+      "godmode": false,
+      "t": 3.6,
+      "x": 5,
+      "y": 1.45,
+      "z": 30.42,
+      "yaw": 0,
+      "aiming": false,
+      "cameraDistance": 6.47,
+      "cameraShoulder": -1
+    },
+    {
+      "label": "PLATFORM-RMB",
+      "state": "playing",
+      "locked": true,
+      "godmode": false,
+      "t": 5.13,
+      "x": 4.29,
+      "y": 1.45,
+      "z": 28.19,
+      "yaw": 0,
+      "aiming": true,
+      "cameraDistance": 3.4,
+      "cameraShoulder": -1
+    },
+    {
+      "label": "PLATFORM-RETURN",
+      "state": "playing",
+      "locked": true,
+      "godmode": false,
+      "t": 6.47,
+      "x": 4.28,
+      "y": 1.45,
+      "z": 37.3,
+      "yaw": 0,
+      "aiming": false,
+      "cameraDistance": 4.66,
+      "cameraShoulder": -1
+    },
+    {
+      "label": "APRON",
+      "state": "playing",
+      "locked": true,
+      "godmode": false,
+      "t": 7.27,
+      "x": 4.62,
+      "y": 0,
+      "z": 45.46,
+      "yaw": 0,
+      "aiming": false,
+      "cameraDistance": 4.71,
+      "cameraShoulder": -1
+    }
+  ],
+  "errors": [],
+  "captures": [
+    "tram-open-traversal-spawn.png",
+    "tram-open-traversal-platform-normal.png",
+    "tram-open-traversal-platform-rmb.png",
+    "tram-open-traversal-apron.png",
+    "tram-open-ordinary-traversal.webm"
+  ]
+}
